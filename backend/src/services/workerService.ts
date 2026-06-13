@@ -247,13 +247,24 @@ export async function addPagesDomain(account: Account, projectName: string, host
   const accountId = account.account_id;
   const cf = getCfClient(account);
 
-  // 1. Create the Pages domain association
+  // 1. Get Pages project info to find the real subdomain
+  let pagesSubdomain: string;
+  try {
+    const projectInfo = await cf.pages.projects.get(projectName, { account_id: accountId! }) as any;
+    // Real subdomain format: {projectName}.{accountSubdomain}.pages.dev
+    pagesSubdomain = projectInfo.subdomain || `${projectName}.pages.dev`;
+    console.log(`[Pages Domain] Real subdomain: ${pagesSubdomain}`);
+  } catch (e) {
+    // Fallback to old format if API fails
+    pagesSubdomain = `${projectName}.pages.dev`;
+    console.log(`[Pages Domain] Failed to get project info, using fallback: ${pagesSubdomain}`);
+  }
+
+  // 2. Create the Pages domain association
   const result = await cf.pages.projects.domains.create(projectName, { account_id: accountId!, name: hostname });
 
-  // 2. Automatically create CNAME DNS record if zone is in the same account
+  // 3. Automatically create CNAME DNS record if zone is in the same account
   try {
-    const pagesSubdomain = `${projectName}.pages.dev`;
-
     // Find matching zone for this hostname
     const zones: any[] = [];
     for await (const zone of cf.zones.list({ per_page: 100 })) {
