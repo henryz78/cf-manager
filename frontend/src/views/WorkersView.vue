@@ -900,14 +900,18 @@ async function openSettings(row: any) {
 
 async function checkR2Availability() {
   try {
-    await workersApi.getR2Buckets(settingsAccountId.value);
-    r2Available.value = true;
-  } catch (err: any) {
-    const msg = err?.response?.data?.error?.message || err?.message || '';
-    if (msg.includes('10042') || msg.includes('Please enable R2')) {
+    const { data } = await workersApi.getR2Buckets(settingsAccountId.value, { _silent: true });
+    if (data?.r2_not_enabled) {
       r2Available.value = false;
     } else {
-      r2Available.value = true;  // 其他错误默认可用
+      r2Available.value = true;
+    }
+  } catch (err: any) {
+    const msg = err?.response?.data?.error?.message || err?.errorMessage || err?.message || '';
+    if (msg.includes('10042') || msg.includes('enable R2') || msg.includes('R2_NOT_ENABLED')) {
+      r2Available.value = false;
+    } else {
+      r2Available.value = true;
     }
   }
 }

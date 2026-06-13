@@ -443,7 +443,14 @@ router.get('/:accountId/resources/r2', async (req: Request, res: Response, next:
     if (!account) return;
     const result = await listR2Buckets(account);
     res.json(result);
-  } catch (err) { next(err); }
+  } catch (err: any) {
+    const msg = JSON.stringify(err) + (err?.message || '');
+    if (msg.includes('10042') || msg.includes('enable R2') || msg.includes('Please enable R2')) {
+      res.json({ r2_not_enabled: true, buckets: [] });
+      return;
+    }
+    next(err);
+  }
 });
 
 router.get('/:accountId/resources/zones', async (req: Request, res: Response, next: NextFunction) => {
