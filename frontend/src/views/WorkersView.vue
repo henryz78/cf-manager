@@ -79,7 +79,7 @@
             <n-button>选择 .zip 文件</n-button>
           </n-upload>
           <span v-if="selectedZipFile" style="margin-left: 8px; font-size: 12px; color: #999">{{ selectedZipFile.name }}</span>
-          <n-text v-else depth="3" style="margin-left: 8px; font-size: 12px">不选则创建空项目</n-text>
+          <n-text v-else-if="!isRedeploy" depth="3" style="margin-left: 8px; font-size: 12px">不选则创建空项目</n-text>
         </n-form-item>
       </n-form>
       <template #action>
@@ -838,6 +838,7 @@ async function handleDeploy() {
   if (!deployForm.value.accountId || !deployForm.value.name) { message.warning('请填写完整信息'); return; }
   if (deployType.value === 'worker' && deploySource.value === 'file' && !selectedFile.value) { message.warning('请选择脚本文件'); return; }
   if (deployType.value === 'worker' && deploySource.value === 'url' && !deployUrl.value) { message.warning('请输入 JS URL'); return; }
+  if (deployType.value === 'pages' && isRedeploy.value && !selectedZipFile.value) { message.warning('重新部署必须上传 ZIP 文件'); return; }
   deploying.value = true;
   try {
     if (deployType.value === 'worker') {
