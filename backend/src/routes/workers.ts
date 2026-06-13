@@ -3,6 +3,7 @@ import multer from 'multer';
 import AdmZip from 'adm-zip';
 import { getActiveAccounts, getAccountById } from '../models/account';
 import { createAuditLog } from '../models/auditLog';
+import { getAccountOr404 } from './routeUtils';
 import {
   listWorkers, listPages, deployWorker, deployWorkerFromUrl, deleteWorker, deletePagesProject, getWorkerLogs, deployPages,
   // Secrets
@@ -33,16 +34,6 @@ import { getAllZones } from '../services/accountRouter';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1 * 1024 * 1024 } });
 const uploadPages = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 100 } });
 const router = Router();
-
-// Helper to get account or 404
-function getAccountOr404(req: Request, res: Response) {
-  const account = getAccountById(parseInt(req.params.accountId as string, 10));
-  if (!account) {
-    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } });
-    return null;
-  }
-  return account;
-}
 
 // ============ List all ============
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
@@ -444,7 +435,7 @@ router.get('/:accountId/resources/r2', async (req: Request, res: Response, next:
     const result = await listR2Buckets(account);
     res.json(result);
   } catch (err: any) {
-    const msg = JSON.stringify(err) + (err?.message || '');
+    const msg = `${err?.message || ''} ${err?.status || ''} ${err?.error?.code || ''}`;
     if (msg.includes('10042') || msg.includes('enable R2') || msg.includes('Please enable R2')) {
       res.json({ r2_not_enabled: true, buckets: [] });
       return;

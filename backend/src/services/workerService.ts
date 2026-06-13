@@ -1,17 +1,8 @@
 import { Account } from '../models/account';
-import { getCfClient } from './cfFactory';
-import { decrypt } from './encryptionService';
+import { getCfClient, getAuthHeaders } from './cfFactory';
 import { proxyFetch } from './proxyService';
 import { getAllZones } from './accountRouter';
 import crypto from 'crypto';
-
-function getAuthHeaders(account: Account): Record<string, string> {
-  if (account.auth_type === 'token') {
-    return { 'Authorization': `Bearer ${decrypt(account.api_token!)}` };
-  } else {
-    return { 'X-Auth-Email': account.email!, 'X-Auth-Key': decrypt(account.api_key!) };
-  }
-}
 
 export interface WorkerScript {
   id: string;
@@ -325,9 +316,9 @@ export async function removePagesDomain(account: Account, projectName: string, h
         records.push(r);
       }
       for (const r of records) {
-        if (r.content === `${projectName}.pages.dev`) {
+        if (r.content?.endsWith('.pages.dev')) {
           await cf.dns.records.delete(r.id, { zone_id: matchingZone.id });
-          console.log(`[Pages Domain] Deleted CNAME: ${hostname}`);
+          console.log(`[Pages Domain] Deleted CNAME: ${hostname} → ${r.content}`);
         }
       }
     }
