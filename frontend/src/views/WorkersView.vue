@@ -651,21 +651,6 @@ const bindingTypeOptions = computed(() => {
   return options;
 });
 
-async function checkR2Available() {
-  if (!settingsAccountId.value) { r2Available.value = true; return; }
-  try {
-    await workersApi.getR2Buckets(settingsAccountId.value);
-    r2Available.value = true;
-  } catch (err: any) {
-    const code = err?.response?.data?.error?.code;
-    const msg = err?.response?.data?.error?.message || err?.message || '';
-    if (code === 'R2_NOT_ENABLED' || msg.includes('10042') || msg.includes('Please enable R2')) {
-      r2Available.value = false;
-    } else {
-      r2Available.value = true;
-    }
-  }
-}
 const bindingResourceOptions = computed(() =>
   bindingResources.value.map((r: any) => ({
     label: r.title || r.name || r.id,
