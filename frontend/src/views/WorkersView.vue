@@ -1076,7 +1076,7 @@ async function openPagesDomainModal() {
   showPagesDomainModal.value = true;
   managedDomainsLoading.value = true;
   try {
-    const { data } = await dnsApi.getDomains();
+    const { data } = await workersApi.getZones(settingsAccountId.value);
     managedDomains.value = Array.isArray(data) ? data : [];
   } catch { managedDomains.value = []; }
   finally { managedDomainsLoading.value = false; }

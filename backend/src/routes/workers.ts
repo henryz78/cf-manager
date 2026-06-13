@@ -445,6 +445,19 @@ router.get('/:accountId/resources/r2', async (req: Request, res: Response, next:
   } catch (err) { next(err); }
 });
 
+router.get('/:accountId/resources/zones', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const account = getAccountOr404(req, res);
+    if (!account) return;
+    const cf = getCfClient(account);
+    const zones: any[] = [];
+    for await (const zone of cf.zones.list({ per_page: 100 })) {
+      zones.push(zone);
+    }
+    res.json(zones);
+  } catch (err) { next(err); }
+});
+
 router.put('/:accountId/pages/:name/bindings', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const account = getAccountOr404(req, res);

@@ -80,6 +80,7 @@ export const workersApi = {
   getKvNamespaces: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/kv`),
   getD1Databases: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/d1`),
   getR2Buckets: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/r2`),
+  getZones: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/zones`),
   updatePagesBindings: (accountId: number, name: string, deploymentConfigs: any) =>
     apiClient.put(`/workers/${accountId}/pages/${name}/bindings`, { deployment_configs: deploymentConfigs }),
 
