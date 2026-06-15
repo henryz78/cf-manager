@@ -77,7 +77,7 @@ function calcPercentage(r: any) {
 
 const logColumns: DataTableColumns<any> = [
   { title: '时间', key: 'created_at', width: 180, render: (row) => new Date(row.created_at).toLocaleString() },
-  { title: '账号', key: 'account_id', width: 80 },
+  { title: '账号', key: 'account_name', width: 120, render: (row) => row.account_name || '-' },
   { title: '操作', key: 'action', width: 150 },
   { title: '目标', key: 'target', width: 150 },
   { title: '详情', key: 'detail', ellipsis: { tooltip: true } },

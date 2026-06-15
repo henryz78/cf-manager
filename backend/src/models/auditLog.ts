@@ -22,8 +22,17 @@ export function createAuditLog(
     .run(accountId, action, target, detail, status);
 }
 
-export function getRecentLogs(limit: number = 20): AuditLog[] {
+export interface AuditLogWithName extends AuditLog {
+  account_name: string | null;
+}
+
+export function getRecentLogs(limit: number = 20): AuditLogWithName[] {
   return getDb()
-    .prepare('SELECT * FROM audit_log ORDER BY created_at DESC LIMIT ?')
-    .all(limit) as AuditLog[];
+    .prepare(
+      `SELECT a.*, acc.name AS account_name
+       FROM audit_log a
+       LEFT JOIN accounts acc ON a.account_id = acc.id
+       ORDER BY a.created_at DESC LIMIT ?`
+    )
+    .all(limit) as AuditLogWithName[];
 }
