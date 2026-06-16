@@ -10,7 +10,7 @@
       <!-- ============ KV Tab ============ -->
       <n-tab-pane name="kv" tab="KV 存储">
         <n-grid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
-          <n-gi :span="24 m:6">
+          <n-gi span="24 m:6">
             <n-card title="命名空间" size="small">
               <template #header-extra>
                 <n-button size="tiny" type="primary" @click="handleCreateKvNs">新建</n-button>
@@ -29,7 +29,7 @@
               </n-spin>
             </n-card>
           </n-gi>
-          <n-gi :span="24 m:18">
+          <n-gi span="24 m:18">
             <n-card :title="selectedKvNs ? `Keys - ${selectedKvNs.title || selectedKvNs.id}` : 'Keys'" size="small">
               <template #header-extra>
                 <n-space>
@@ -49,7 +49,7 @@
       <!-- ============ D1 Tab ============ -->
       <n-tab-pane name="d1" tab="D1 数据库">
         <n-grid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
-          <n-gi :span="24 m:6">
+          <n-gi span="24 m:6">
             <n-card title="数据库" size="small">
               <template #header-extra>
                 <n-button size="tiny" type="primary" @click="handleCreateD1Db">新建</n-button>
@@ -82,7 +82,7 @@
               <n-empty v-if="!d1Tables.length" description="暂无表" />
             </n-card>
           </n-gi>
-          <n-gi :span="24 m:18">
+          <n-gi span="24 m:18">
             <n-card title="SQL 查询" size="small">
               <n-input v-model:value="d1Sql" type="textarea" :rows="4" placeholder="输入 SQL 查询..." style="margin-bottom: 12px; font-family: monospace;" />
               <n-space>
@@ -101,7 +101,7 @@
       <!-- ============ R2 Tab ============ -->
       <n-tab-pane v-if="r2Available" name="r2" tab="R2 存储">
         <n-grid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
-          <n-gi :span="24 m:6">
+          <n-gi span="24 m:6">
             <n-card title="存储桶" size="small">
               <template #header-extra>
                 <n-button size="tiny" type="primary" @click="handleCreateR2Bucket">新建</n-button>
@@ -120,7 +120,7 @@
               </n-spin>
             </n-card>
           </n-gi>
-          <n-gi :span="24 m:18">
+          <n-gi span="24 m:18">
             <n-card :title="selectedR2Bucket ? `文件 - ${selectedR2Bucket.name}` : '文件'" size="small">
               <template #header-extra>
                 <n-button size="small" type="primary" @click="showR2Upload = true" :disabled="!selectedR2Bucket">上传</n-button>
