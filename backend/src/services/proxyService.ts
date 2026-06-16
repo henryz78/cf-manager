@@ -5,6 +5,17 @@ import nodeFetch from 'node-fetch';
 import { config } from '../config';
 import { getSetting, setSetting } from '../db';
 
+export interface FetchResponse {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  headers: { get(name: string): string | null };
+  text(): Promise<string>;
+  json(): Promise<any>;
+  arrayBuffer(): Promise<ArrayBuffer>;
+  body: any;
+}
+
 let cachedAgent: Agent | undefined;
 let cachedUrl = '';
 
@@ -36,21 +47,19 @@ export function getHttpAgent(): Agent | undefined {
   return cachedAgent;
 }
 
-export async function proxyFetch(input: string | URL, init?: any): Promise<Response> {
+export async function proxyFetch(input: string | URL, init?: any): Promise<FetchResponse> {
   const agent = getHttpAgent();
-  if (!agent) return fetch(input, init);
+  if (!agent) return fetch(input, init) as unknown as FetchResponse;
 
   const doFetch = () => nodeFetch(input.toString(), { ...init, agent });
   try {
-    const resp = await doFetch();
-    return resp as unknown as Response;
+    return await doFetch() as unknown as FetchResponse;
   } catch (err: any) {
     if (err.code === 'ECONNRESET' || err.code === 'EPIPE') {
       cachedAgent = undefined;
       cachedUrl = '';
       const newAgent = getHttpAgent();
-      const resp = await nodeFetch(input.toString(), { ...init, agent: newAgent });
-      return resp as unknown as Response;
+      return await nodeFetch(input.toString(), { ...init, agent: newAgent }) as unknown as FetchResponse;
     }
     throw err;
   }

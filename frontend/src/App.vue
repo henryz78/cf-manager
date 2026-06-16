@@ -143,10 +143,7 @@ const menuOptions = [
 ];
 
 function handleMenuClick(key: string) {
-  console.log('Menu clicked:', key);
-  router.push({ name: key }).catch((err) => {
-    console.error('Router error:', err);
-  });
+  router.push({ name: key }).catch(() => {});
 }
 
 function toggleTheme() {

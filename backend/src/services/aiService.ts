@@ -1,6 +1,6 @@
 import { Account } from '../models/account';
 import { getCfClient, getAuthHeaders } from './cfFactory';
-import { proxyFetch } from './proxyService';
+import { proxyFetch, type FetchResponse } from './proxyService';
 import { appLogger } from './logger';
 
 export async function getAvailableModels(account: Account, taskFilter?: string): Promise<any[]> {
@@ -215,7 +215,7 @@ export async function getAiUsageToday(account: Account): Promise<AiUsage> {
   const headers = getAuthHeaders(account);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
-  let resp: Response;
+  let resp: FetchResponse;
   try {
     resp = await proxyFetch('https://api.cloudflare.com/client/v4/graphql', {
       method: 'POST',

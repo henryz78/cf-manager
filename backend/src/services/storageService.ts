@@ -150,7 +150,9 @@ export async function deleteR2Object(account: Account, bucketName: string, key: 
 }
 
 export async function bulkDeleteR2Objects(account: Account, bucketName: string, keys: string[]): Promise<void> {
-  for (const key of keys) {
-    await deleteR2Object(account, bucketName, key);
+  const BATCH_SIZE = 10;
+  for (let i = 0; i < keys.length; i += BATCH_SIZE) {
+    const batch = keys.slice(i, i + BATCH_SIZE);
+    await Promise.all(batch.map(key => deleteR2Object(account, bucketName, key)));
   }
 }

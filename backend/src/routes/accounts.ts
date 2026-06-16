@@ -98,7 +98,8 @@ router.delete('/:id', (req: Request, res: Response, next: NextFunction) => {
   try {
     const id = parseInt(req.params.id as string, 10);
     const account = getAccountById(id);
-    createAuditLog(id, 'delete_account', account?.name || String(id), null, 'success');
+    if (!account) { res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }); return; }
+    createAuditLog(id, 'delete_account', account.name, null, 'success');
     deleteAccount(id);
     res.json({ success: true });
   } catch (err) { next(err); }

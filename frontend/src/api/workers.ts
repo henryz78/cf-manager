@@ -27,8 +27,8 @@ export const workersApi = {
 
   // Secrets
   getSecrets: (accountId: number, name: string) => apiClient.get(`/workers/${accountId}/workers/${name}/secrets`),
-  updateSecret: (accountId: number, name: string, _secretName: string, type: string, text?: string, keyBase64?: string) =>
-    apiClient.put(`/workers/${accountId}/workers/${name}/secrets`, { name, type, text, key_base64: keyBase64 }),
+  updateSecret: (accountId: number, workerName: string, secretName: string, type: string, text?: string, keyBase64?: string) =>
+    apiClient.put(`/workers/${accountId}/workers/${workerName}/secrets`, { name: secretName, type, text, key_base64: keyBase64 }),
   deleteSecret: (accountId: number, name: string, secretName: string) =>
     apiClient.delete(`/workers/${accountId}/workers/${name}/secrets/${secretName}`),
 

@@ -102,10 +102,10 @@ export async function listSecrets(account: Account, scriptName: string): Promise
   return secrets;
 }
 
-export async function updateSecret(account: Account, scriptName: string, name: string, type: string, text?: string, keyBase64?: string): Promise<any> {
+export async function updateSecret(account: Account, scriptName: string, secretName: string, type: string, text?: string, keyBase64?: string): Promise<any> {
   const accountId = account.account_id;
   const cf = getCfClient(account);
-  const params: any = { account_id: accountId!, name, type };
+  const params: any = { account_id: accountId!, name: secretName, type };
   if (type === 'secret_text') params.text = text;
   if (type === 'secret_key') params.key_base64 = keyBase64;
   return await cf.workers.scripts.secrets.update(scriptName, params);

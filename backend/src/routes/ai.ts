@@ -53,19 +53,23 @@ router.post('/inference', async (req, res, next) => {
       );
     }
 
-    async function tryWithFallback(idx: number): Promise<void> {
-      const account = accounts[idx];
-      return new Promise<void>((resolve) => {
+    function ensureSSEHeaders() {
+      if (!res.headersSent) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
-        if (!res.headersSent) res.flushHeaders();
+        res.flushHeaders();
+      }
+    }
 
+    async function tryWithFallback(idx: number): Promise<void> {
+      const account = accounts[idx];
+      return new Promise<void>((resolve) => {
         runInferenceStream(
           account, model, prompt, historyMessages,
-          (chunk) => { res.write(`data: ${JSON.stringify({ type: 'content', chunk })}\n\n`); },
-          (chunk) => { res.write(`data: ${JSON.stringify({ type: 'reasoning', chunk })}\n\n`); },
-          () => { res.write('data: [DONE]\n\n'); res.end(); resolve(); },
+          (chunk) => { ensureSSEHeaders(); res.write(`data: ${JSON.stringify({ type: 'content', chunk })}\n\n`); },
+          (chunk) => { ensureSSEHeaders(); res.write(`data: ${JSON.stringify({ type: 'reasoning', chunk })}\n\n`); },
+          () => { ensureSSEHeaders(); res.write('data: [DONE]\n\n'); res.end(); resolve(); },
           async (err) => {
             const is4006 = err.message.includes('4006') || err.message.includes('daily free allocation');
             if (is4006) {
@@ -77,6 +81,7 @@ router.post('/inference', async (req, res, next) => {
               await tryWithFallback(idx + 1);
               resolve();
             } else {
+              ensureSSEHeaders();
               res.write(`data: ${JSON.stringify({ error: is4006 ? 'ALL_ACCOUNTS_EXHAUSTED: 所有账户神经元已耗尽' : err.message })}\n\n`);
               res.end();
               resolve();
