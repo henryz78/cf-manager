@@ -22,7 +22,7 @@
       </n-spin>
     </n-card>
 
-    <n-card title="代理设置" size="small" style="margin-bottom: 16px">
+    <n-card v-if="!isWorkerPlatform" title="代理设置" size="small" style="margin-bottom: 16px">
       <n-space vertical>
         <n-space align="center">
           <n-switch :value="proxyEnabled" @update:value="toggleProxy" :loading="proxyToggling" />
@@ -46,7 +46,7 @@
     </n-card>
 
     <!-- 定时任务 -->
-    <n-card size="small">
+    <n-card v-if="!isWorkerPlatform" size="small">
       <template #header>
         定时任务
         <n-tag size="small" type="warning" style="margin-left: 8px; vertical-align: middle">任务逻辑待实现</n-tag>
@@ -61,7 +61,7 @@
     </n-card>
 
     <!-- 添加/编辑任务 Modal -->
-    <n-modal v-model:show="showTaskModal" preset="dialog" :title="editingTaskId ? '编辑任务' : '添加任务'" style="width: 550px; max-width: 95vw">
+    <n-modal v-if="!isWorkerPlatform" v-model:show="showTaskModal" preset="dialog" :title="editingTaskId ? '编辑任务' : '添加任务'" style="width: 550px; max-width: 95vw">
       <n-form label-placement="left" label-width="100">
         <n-form-item label="任务名称">
           <n-input v-model:value="taskForm.name" placeholder="例如: 每日配额报告" />
@@ -120,7 +120,7 @@
     </n-modal>
 
     <!-- 执行历史 Drawer -->
-    <n-drawer v-model:show="showHistoryDrawer" :width="drawerWidth(520)" placement="right">
+    <n-drawer v-if="!isWorkerPlatform" v-model:show="showHistoryDrawer" :width="drawerWidth(520)" placement="right">
       <n-drawer-content :title="`执行历史 - ${historyTaskName}`" closable>
         <n-spin :show="historyLoading">
           <n-timeline>
@@ -157,6 +157,8 @@ const proxyEnabled = ref(false);
 const proxySaving = ref(false);
 const proxyTesting = ref(false);
 const proxyToggling = ref(false);
+
+const isWorkerPlatform = computed(() => settings.value.platform === 'cloudflare-workers');
 
 async function fetchSettings() {
   loading.value = true;
@@ -361,9 +363,11 @@ const taskColumns: DataTableColumns<any> = [
   },
 ];
 
-onMounted(() => {
-  fetchSettings();
-  fetchTasks();
+onMounted(async () => {
+  await fetchSettings();
+  if (!isWorkerPlatform.value) {
+    fetchTasks();
+  }
   accountStore.fetchAccounts();
 });
 </script>

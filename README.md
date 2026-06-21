@@ -2,6 +2,17 @@
 
 一站式 Cloudflare 多账户管理平台。提供可视化界面统一管理 Workers、Pages、DNS、KV、D1、R2、AI 推理、浏览器渲染等服务，同时暴露 OpenAI 兼容 API 供外部项目调用。
 
+## 在线演示
+
+| | |
+|---|---|
+| 地址 | [https://cfmgr.pages.dev/](https://cfmgr.pages.dev/) |
+| 密码 | `cfmgrbest` |
+
+> 演示站部署在 Cloudflare Pages + D1，无需 Docker。
+
+---
+
 ## 功能特性
 
 ### 多账户管理
@@ -69,7 +80,19 @@
 
 ## 快速开始
 
-### Docker 部署（推荐）
+> 两种部署方式可选，详见 [部署文档](docs/deploy.md)
+
+### Cloudflare Pages 部署（零成本）
+
+```bash
+cd worker
+npm install
+npm run build    # 构建 → worker/cf-manager.zip
+```
+
+将 `cf-manager.zip` 上传至 Cloudflare Pages Dashboard，配置 D1 绑定和环境变量即可。
+
+### Docker 部署
 
 ```bash
 # 1. 克隆项目
@@ -116,12 +139,12 @@ npm run dev
 
 ## 技术栈
 
-| 层级 | 技术 |
-|---|---|
-| 前端 | Vue 3 + Naive UI + Pinia + Vue Router |
-| 后端 | Express 5 + TypeScript + Cloudflare SDK |
-| 数据库 | SQLite (better-sqlite3) |
-| 部署 | Docker Compose (nginx + Node.js) |
+| 层级 | Docker 版 | Worker 版 |
+|---|---|---|
+| 前端 | Vue 3 + Naive UI + Pinia | 同左 |
+| 后端 | Express 5 + Cloudflare SDK | Hono + Cloudflare REST API |
+| 数据库 | SQLite (better-sqlite3) | Cloudflare D1 |
+| 部署 | Docker Compose | Cloudflare Pages |
 
 ---
 
@@ -144,6 +167,10 @@ cf-manager/
 │       ├── views/           # 页面组件
 │       ├── stores/          # Pinia 状态管理
 │       └── utils/           # 工具函数
+├── worker/                  # Cloudflare Pages 部署版
+│   ├── src/                 # Hono API 路由 + D1 模型
+│   ├── build.js             # 一键构建脚本
+│   └── wrangler.toml        # Wrangler 配置
 ├── docker/                  # Docker 构建配置
 │   ├── backend/Dockerfile
 │   └── frontend/

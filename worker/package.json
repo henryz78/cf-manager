@@ -1,0 +1,22 @@
+{
+  "name": "cf-manager-worker",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler pages dev public/ --d1 DB",
+    "build": "node build.js",
+    "build:worker": "esbuild src/index.ts --bundle --outfile=public/_worker.js --format=esm --target=es2022 --minify",
+    "deploy": "node build.js && wrangler pages deploy public/ --project-name cf-manager",
+    "db:init": "wrangler d1 execute cf-manager --file=src/db/schema.sql --remote"
+  },
+  "dependencies": {
+    "hono": "^4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4",
+    "adm-zip": "^0.5",
+    "esbuild": "^0.25",
+    "wrangler": "^4",
+    "typescript": "^5"
+  }
+}

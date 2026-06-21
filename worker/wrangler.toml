@@ -1,0 +1,13 @@
+name = "cf-manager"
+compatibility_date = "2024-12-01"
+main = "src/index.ts"
+pages_build_output_dir = "public"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cf-manager"
+database_id = "YOUR_D1_DATABASE_ID"
+
+[vars]
+API_SECRET = ""
+ENCRYPTION_KEY = ""
