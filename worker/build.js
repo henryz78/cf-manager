@@ -1,7 +1,14 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const JavaScriptObfuscator = require('javascript-obfuscator');
+
+const OBFUSCATE_FRONTEND = process.env.OBFUSCATE_FRONTEND === 'true';
+const OBFUSCATE_WORKER = process.env.OBFUSCATE_WORKER !== 'false';
+
+let JavaScriptObfuscator;
+if (OBFUSCATE_FRONTEND || OBFUSCATE_WORKER) {
+  JavaScriptObfuscator = require('javascript-obfuscator');
+}
 
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
@@ -19,26 +26,7 @@ function clean(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-const frontendObfuscatorOptions = {
-  compact: true,
-  controlFlowFlattening: true,
-  controlFlowFlatteningThreshold: 0.5,
-  deadCodeInjection: true,
-  deadCodeInjectionThreshold: 0.3,
-  identifierNamesGenerator: 'hexadecimal',
-  renameGlobals: false,
-  selfDefending: false,
-  stringArray: true,
-  stringArrayCallsTransform: true,
-  stringArrayEncoding: ['base64'],
-  stringArrayThreshold: 0.75,
-  splitStrings: true,
-  splitStringsChunkLength: 10,
-  transformObjectKeys: true,
-  unicodeEscapeSequence: false,
-};
-
-const workerObfuscatorOptions = {
+const obfuscatorOptions = {
   compact: true,
   controlFlowFlattening: false,
   deadCodeInjection: false,
@@ -46,12 +34,11 @@ const workerObfuscatorOptions = {
   renameGlobals: false,
   selfDefending: false,
   stringArray: true,
-  stringArrayCallsTransform: true,
+  stringArrayCallsTransform: false,
   stringArrayEncoding: ['base64'],
   stringArrayThreshold: 0.75,
-  splitStrings: true,
-  splitStringsChunkLength: 10,
-  transformObjectKeys: true,
+  splitStrings: false,
+  transformObjectKeys: false,
   unicodeEscapeSequence: false,
 };
 
@@ -79,37 +66,50 @@ const frontendDir = path.resolve(__dirname, '../frontend');
 const publicDir = path.resolve(__dirname, 'public');
 const distDir = path.resolve(frontendDir, 'dist');
 
-console.log('[1/6] Installing frontend dependencies...');
+const totalSteps = 5 + (OBFUSCATE_FRONTEND ? 1 : 0) + (OBFUSCATE_WORKER ? 1 : 0);
+let step = 0;
+
+console.log(`\nObfuscation: frontend=${OBFUSCATE_FRONTEND ? 'ON' : 'OFF'}, worker=${OBFUSCATE_WORKER ? 'ON' : 'OFF'}`);
+console.log(`  Set OBFUSCATE_FRONTEND=true to enable frontend obfuscation`);
+console.log(`  Set OBFUSCATE_WORKER=false to disable worker obfuscation\n`);
+
+console.log(`[${++step}/${totalSteps}] Installing frontend dependencies...`);
 execSync('npm install', { cwd: frontendDir, stdio: 'inherit' });
 
-console.log('[2/6] Building frontend (base=/admin/)...');
+console.log(`[${++step}/${totalSteps}] Building frontend (base=/admin/)...`);
 execSync('npm run build', {
   cwd: frontendDir,
   stdio: 'inherit',
   env: { ...process.env, VITE_BASE_URL: '/admin/' },
 });
 
-console.log('[3/6] Copying frontend assets to public/...');
+console.log(`[${++step}/${totalSteps}] Copying frontend assets to public/...`);
 clean(publicDir);
 copyDir(distDir, publicDir);
 
-console.log('[4/6] Obfuscating frontend JavaScript...');
-const assetsDir = path.join(publicDir, 'assets');
-const frontendCount = obfuscateDir(assetsDir, frontendObfuscatorOptions);
-console.log(`  Obfuscated ${frontendCount} frontend files`);
+if (OBFUSCATE_FRONTEND) {
+  console.log(`[${++step}/${totalSteps}] Obfuscating frontend JavaScript...`);
+  const assetsDir = path.join(publicDir, 'assets');
+  const frontendCount = obfuscateDir(assetsDir, obfuscatorOptions);
+  console.log(`  Obfuscated ${frontendCount} frontend files`);
+}
 
-console.log('[5/6] Bundling & obfuscating worker backend...');
+console.log(`[${++step}/${totalSteps}] Bundling worker backend...`);
 execSync('npx esbuild src/index.ts --bundle --outfile=public/_worker.js --format=esm --target=es2022 --minify', {
   cwd: __dirname,
   stdio: 'inherit',
 });
-obfuscateFile(path.join(publicDir, '_worker.js'), {
-  ...workerObfuscatorOptions,
-  sourceType: 'module',
-});
-console.log('  Worker obfuscated');
 
-console.log('[6/6] Creating ZIP package...');
+if (OBFUSCATE_WORKER) {
+  console.log(`[${++step}/${totalSteps}] Obfuscating worker backend...`);
+  obfuscateFile(path.join(publicDir, '_worker.js'), {
+    ...obfuscatorOptions,
+    sourceType: 'module',
+  });
+  console.log('  Worker obfuscated');
+}
+
+console.log(`[${++step}/${totalSteps}] Creating ZIP package...`);
 const AdmZip = require('adm-zip');
 const zip = new AdmZip();
 zip.addLocalFolder(publicDir);

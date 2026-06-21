@@ -372,7 +372,7 @@ app.get('/:accountId/resources/r2', async (c) => {
     return c.json(data.result?.buckets || []);
   } catch (e: any) {
     if (e.body?.includes('10042') || e.body?.includes('enable R2')) {
-      return c.json({ r2_not_enabled: true, buckets: [] });
+      return c.json({ success: false, error: { code: 'R2_NOT_ENABLED', message: 'R2 is not enabled for this account' } }, 403);
     }
     throw e;
   }

@@ -4,10 +4,10 @@
 
 ## 在线演示
 
-| |                                                                  |
-|---|------------------------------------------------------------------|
-| 地址 | [https://mgrcf.pages.dev/admin/](https://cfmgr.pages.dev/admin/) |
-| 密码 | `mgrcfbest`                                                      |
+| | |
+|---|---|
+| 地址 | [https://mgrcf.pages.dev/admin/](https://mgrcf.pages.dev/admin/) |
+| 密码 | `mgrcfbest` |
 
 > 演示站部署在 Cloudflare Pages + D1，无需 Docker。根路径显示伪装的 nginx 欢迎页，管理界面通过 `/admin/` 访问。
 
