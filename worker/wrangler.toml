@@ -11,3 +11,4 @@ database_id = "YOUR_D1_DATABASE_ID"
 [vars]
 API_SECRET = ""
 ENCRYPTION_KEY = ""
+DEMO_ACCOUNT_IDS = ""
