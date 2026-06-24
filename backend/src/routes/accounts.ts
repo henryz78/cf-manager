@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Cloudflare from 'cloudflare';
 import { getAllAccounts, createAccount, deleteAccount, getAccountById, updateAccountStatus, updateAccountId, updateAccountFeatures, AccountInput } from '../models/account';
-import { encrypt } from '../services/encryptionService';
+import { encrypt, decrypt } from '../services/encryptionService';
 import { getCfClient } from '../services/cfFactory';
 import { getQuotaSummary } from '../services/quotaTracker';
 import { clearCache } from '../services/accountRouter';
@@ -19,12 +19,26 @@ function isDemoAccount(id: number): boolean {
 
 router.get('/', (_req: Request, res: Response, next: NextFunction) => {
   try {
-    const accounts = getAllAccounts().map(a => ({
-      ...a,
-      api_token: a.api_token ? '***encrypted***' : null,
-      api_key: a.api_key ? '***encrypted***' : null,
-      is_demo: isDemoAccount(a.id),
-    }));
+    const accounts = getAllAccounts().map(a => {
+      let api_token = null;
+      let api_key = null;
+      try {
+        if (a.api_token) {
+          api_token = decrypt(a.api_token);
+        }
+        if (a.api_key) {
+          api_key = decrypt(a.api_key);
+        }
+      } catch (e) {
+        appLogger.error(`[Account] Decrypt failed for account ${a.name || a.id}: ${e}`);
+      }
+      return {
+        ...a,
+        api_token,
+        api_key,
+        is_demo: isDemoAccount(a.id),
+      };
+    });
     const quota = getQuotaSummary();
     res.json({ accounts, quota });
   } catch (err) { next(err); }

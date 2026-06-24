@@ -4,35 +4,35 @@ on:
   workflow_dispatch:
     inputs:
       cf_api_key:
-        description: 'Cloudflare Global API Key'
-        required: true
+        description: 'Cloudflare Global API Key (若配置了仓库 Secret/Variable 可不填)'
+        required: false
         type: string
       cf_email:
-        description: 'Cloudflare 账号邮箱'
-        required: true
+        description: 'Cloudflare 账号邮箱 (若配置了仓库 Secret/Variable 可不填)'
+        required: false
         type: string
       project_name:
-        description: 'Pages 项目名称'
+        description: 'Pages 项目名称 (若配置了仓库 Secret/Variable 可不填)'
         required: false
         default: 'cfmgr'
         type: string
       d1_database_name:
-        description: 'D1 数据库名称'
+        description: 'D1 数据库名称 (若配置了仓库 Secret/Variable 可不填)'
         required: false
         default: 'cfmgr'
         type: string
       encryption_key:
-        description: '加密密钥（用于加密存储 API Token）'
+        description: '加密密钥（用于加密存储 API Token，若配置了仓库 Secret/Variable 可不填）'
         required: false
         default: 'cfmgrbest'
         type: string
       api_secret:
-        description: '访问密码（留空则无需登录）'
+        description: '访问密码（留空则无需登录，若配置了仓库 Secret/Variable 可不填）'
         required: false
         default: 'cfmgrbest'
         type: string
       demo_account_ids:
-        description: '演示模式保护的账户 ID（逗号分隔，如 1,2,3，留空则不启用）'
+        description: '演示模式保护的账户 ID（逗号分隔，如 1,2,3，若配置了仓库 Secret/Variable 可不填）'
         required: false
         default: ''
         type: string
@@ -41,14 +41,31 @@ permissions:
   contents: read
 
 env:
-  CLOUDFLARE_API_KEY: ${{ github.event.inputs.cf_api_key }}
-  CLOUDFLARE_EMAIL: ${{ github.event.inputs.cf_email }}
+  CLOUDFLARE_API_KEY: ${{ github.event.inputs.cf_api_key || secrets.CLOUDFLARE_API_KEY || vars.CLOUDFLARE_API_KEY || secrets.CF_API_KEY || vars.CF_API_KEY }}
+  CLOUDFLARE_EMAIL: ${{ github.event.inputs.cf_email || secrets.CLOUDFLARE_EMAIL || vars.CLOUDFLARE_EMAIL || secrets.CF_EMAIL || vars.CF_EMAIL }}
+  PROJECT_NAME: ${{ github.event.inputs.project_name || secrets.PROJECT_NAME || vars.PROJECT_NAME || 'cfmgr' }}
+  D1_DATABASE_NAME: ${{ github.event.inputs.d1_database_name || secrets.D1_DATABASE_NAME || vars.D1_DATABASE_NAME || 'cfmgr' }}
+  ENCRYPTION_KEY: ${{ github.event.inputs.encryption_key || secrets.ENCRYPTION_KEY || vars.ENCRYPTION_KEY || 'cfmgrbest' }}
+  API_SECRET: ${{ github.event.inputs.api_secret || secrets.API_SECRET || vars.API_SECRET || 'cfmgrbest' }}
+  DEMO_ACCOUNT_IDS: ${{ github.event.inputs.demo_account_ids || secrets.DEMO_ACCOUNT_IDS || vars.DEMO_ACCOUNT_IDS || '' }}
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Check inputs and secrets
+        run: |
+          if [ -z "$CLOUDFLARE_API_KEY" ]; then
+            echo "Error: Cloudflare Global API Key is not set! Please enter it in the workflow inputs or set it in your GitHub repository Secrets/Variables (CLOUDFLARE_API_KEY)."
+            exit 1
+          fi
+          if [ -z "$CLOUDFLARE_EMAIL" ]; then
+            echo "Error: Cloudflare Email is not set! Please enter it in the workflow inputs or set it in your GitHub repository Secrets/Variables (CLOUDFLARE_EMAIL)."
+            exit 1
+          fi
+          echo "Cloudflare credentials check passed."
 
       - uses: actions/setup-node@v5
         with:
@@ -60,21 +77,21 @@ jobs:
       - name: Setup D1 database
         id: d1
         run: |
-          DB_NAME="${{ github.event.inputs.d1_database_name }}"
+          echo "Setting up D1 database: $D1_DATABASE_NAME"
 
           # 从 wrangler d1 list 中提取 UUID（格式：xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx）
-          DB_ID=$(wrangler d1 list 2>/dev/null | grep "$DB_NAME" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || echo "")
+          DB_ID=$(wrangler d1 list 2>/dev/null | grep "$D1_DATABASE_NAME" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' || echo "")
 
           if [ -z "$DB_ID" ]; then
-            echo "Creating D1 database: $DB_NAME"
-            wrangler d1 create "$DB_NAME"
-            DB_ID=$(wrangler d1 list | grep "$DB_NAME" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
+            echo "Creating D1 database: $D1_DATABASE_NAME"
+            wrangler d1 create "$D1_DATABASE_NAME"
+            DB_ID=$(wrangler d1 list | grep "$D1_DATABASE_NAME" | grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
             echo "Created database with ID: $DB_ID"
 
             echo "Initializing database schema..."
-            wrangler d1 execute "$DB_NAME" --file=worker/src/db/schema.sql --remote
+            wrangler d1 execute "$D1_DATABASE_NAME" --file=worker/src/db/schema.sql --remote
           else
-            echo "Database already exists: $DB_NAME (ID: $DB_ID)"
+            echo "Database already exists: $D1_DATABASE_NAME (ID: $DB_ID)"
           fi
 
           echo "database_id=$DB_ID" >> $GITHUB_OUTPUT
@@ -85,7 +102,7 @@ jobs:
           sed -i '/^main = /d' wrangler.toml
           sed -i '/^\[vars\]/,/^$/d' wrangler.toml
           sed -i "s/database_id = \".*\"/database_id = \"${{ steps.d1.outputs.database_id }}\"/" wrangler.toml
-          sed -i "s/^name = \".*\"/name = \"${{ github.event.inputs.project_name }}\"/" wrangler.toml
+          sed -i "s/^name = \".*\"/name = \"$PROJECT_NAME\"/" wrangler.toml
 
       - name: Install worker dependencies
         working-directory: worker
@@ -97,34 +114,37 @@ jobs:
 
       - name: Create Pages project if not exists
         run: |
-          wrangler pages project create "${{ github.event.inputs.project_name }}" --production-branch main 2>/dev/null || echo "Project already exists, skipping creation"
+          wrangler pages project create "$PROJECT_NAME" --production-branch main 2>/dev/null || echo "Project already exists, skipping creation"
 
       - name: Configure secrets
         run: |
-          echo "${{ github.event.inputs.encryption_key }}" | wrangler pages secret put ENCRYPTION_KEY --project-name "${{ github.event.inputs.project_name }}"
-          if [ -n "${{ github.event.inputs.api_secret }}" ]; then
-            echo "${{ github.event.inputs.api_secret }}" | wrangler pages secret put API_SECRET --project-name "${{ github.event.inputs.project_name }}"
+          echo "$ENCRYPTION_KEY" | wrangler pages secret put ENCRYPTION_KEY --project-name "$PROJECT_NAME"
+          if [ -n "$API_SECRET" ]; then
+            echo "$API_SECRET" | wrangler pages secret put API_SECRET --project-name "$PROJECT_NAME"
           fi
-          if [ -n "${{ github.event.inputs.demo_account_ids }}" ]; then
-            echo "${{ github.event.inputs.demo_account_ids }}" | wrangler pages secret put DEMO_ACCOUNT_IDS --project-name "${{ github.event.inputs.project_name }}"
+          if [ -n "$DEMO_ACCOUNT_IDS" ]; then
+            echo "$DEMO_ACCOUNT_IDS" | wrangler pages secret put DEMO_ACCOUNT_IDS --project-name "$PROJECT_NAME"
           fi
 
       - name: Deploy to Cloudflare Pages
         working-directory: worker
-        run: wrangler pages deploy public/ --project-name "${{ github.event.inputs.project_name }}" --branch main --commit-dirty=true
+        run: |
+          wrangler pages deploy public/ --project-name "$PROJECT_NAME" --branch main --commit-dirty=true
 
       - name: Deployment summary
         run: |
+          CF_API_KEY_MASKED="${CLOUDFLARE_API_KEY:0:4}...${CLOUDFLARE_API_KEY: -4}"
+          
           echo "## 部署完成 ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| 配置项 | 值 |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-----|" >> $GITHUB_STEP_SUMMARY
-          echo "| CF 邮箱 | ${{ github.event.inputs.cf_email }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| CF API Key | ${{ github.event.inputs.cf_api_key }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Pages 项目 | ${{ github.event.inputs.project_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| D1 数据库 | ${{ github.event.inputs.d1_database_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| CF 邮箱 | $CLOUDFLARE_EMAIL |" >> $GITHUB_STEP_SUMMARY
+          echo "| CF API Key | $CF_API_KEY_MASKED |" >> $GITHUB_STEP_SUMMARY
+          echo "| Pages 项目 | $PROJECT_NAME |" >> $GITHUB_STEP_SUMMARY
+          echo "| D1 数据库 | $D1_DATABASE_NAME |" >> $GITHUB_STEP_SUMMARY
           echo "| Database ID | ${{ steps.d1.outputs.database_id }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| ENCRYPTION_KEY | ${{ github.event.inputs.encryption_key }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| API_SECRET | ${{ github.event.inputs.api_secret }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| DEMO_ACCOUNT_IDS | ${{ github.event.inputs.demo_account_ids }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 访问地址 | https://${{ github.event.inputs.project_name }}.pages.dev/admin/ |" >> $GITHUB_STEP_SUMMARY
+          echo "| ENCRYPTION_KEY | $ENCRYPTION_KEY |" >> $GITHUB_STEP_SUMMARY
+          echo "| API_SECRET | $API_SECRET |" >> $GITHUB_STEP_SUMMARY
+          echo "| DEMO_ACCOUNT_IDS | $DEMO_ACCOUNT_IDS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 访问地址 | https://$PROJECT_NAME.pages.dev/admin/ |" >> $GITHUB_STEP_SUMMARY

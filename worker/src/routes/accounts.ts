@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { Env } from '../types';
 import { getAllAccounts, getAccountById, createAccount, updateAccount, deleteAccount, addAuditLog } from '../db/models';
-import { encrypt } from '../services/encryption';
+import { encrypt, decrypt } from '../services/encryption';
 import { cfFetch } from '../services/cfApi';
 import { getQuotaSummary } from '../services/quotaTracker';
 
@@ -15,12 +15,28 @@ function isDemoAccount(id: number, demoIds: string | undefined): boolean {
 app.get('/', async (c) => {
   const db = c.env.DB;
   const demoIds = c.env.DEMO_ACCOUNT_IDS;
-  const accounts = (await getAllAccounts(db)).map(a => ({
-    ...a,
-    api_token: a.api_token ? '***encrypted***' : null,
-    api_key: a.api_key ? '***encrypted***' : null,
-    is_demo: isDemoAccount(a.id, demoIds),
-  }));
+  const rawAccounts = await getAllAccounts(db);
+  const accounts = [];
+  for (const a of rawAccounts) {
+    let api_token = null;
+    let api_key = null;
+    try {
+      if (a.api_token) {
+        api_token = await decrypt(a.api_token, c.env.ENCRYPTION_KEY);
+      }
+      if (a.api_key) {
+        api_key = await decrypt(a.api_key, c.env.ENCRYPTION_KEY);
+      }
+    } catch (e) {
+      console.error(`[Account] Decrypt failed for account ${a.name || a.id}: ${e}`);
+    }
+    accounts.push({
+      ...a,
+      api_token,
+      api_key,
+      is_demo: isDemoAccount(a.id, demoIds),
+    });
+  }
   const quota = await getQuotaSummary(db, c.env.ENCRYPTION_KEY);
   return c.json({ accounts, quota });
 });
