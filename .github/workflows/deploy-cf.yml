@@ -12,29 +12,24 @@ on:
         required: false
         type: string
       project_name:
-        description: 'Pages 项目名称 (若配置了仓库 Secret/Variable 可不填)'
+        description: 'Pages 项目名称 (默认: cfmgr)'
         required: false
-        default: 'cfmgr'
         type: string
       d1_database_name:
-        description: 'D1 数据库名称 (若配置了仓库 Secret/Variable 可不填)'
+        description: 'D1 数据库名称 (默认: cfmgr)'
         required: false
-        default: 'cfmgr'
         type: string
       encryption_key:
-        description: '加密密钥（用于加密存储 API Token，若配置了仓库 Secret/Variable 可不填）'
+        description: '加密密钥（用于加密存储 API Token，默认: cfmgrbest）'
         required: false
-        default: 'cfmgrbest'
         type: string
       api_secret:
-        description: '访问密码（留空则无需登录，若配置了仓库 Secret/Variable 可不填）'
+        description: '访问密码（留空则无需登录，默认: cfmgrbest）'
         required: false
-        default: 'cfmgrbest'
         type: string
       demo_account_ids:
-        description: '演示模式保护的账户 ID（逗号分隔，如 1,2,3，若配置了仓库 Secret/Variable 可不填）'
+        description: '演示模式保护的账户 ID（逗号分隔，如 1,2,3，留空则不启用）'
         required: false
-        default: ''
         type: string
 
 permissions:
