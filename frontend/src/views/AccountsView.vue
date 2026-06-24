@@ -2,7 +2,7 @@
   <div>
     <n-space justify="space-between" align="center">
       <n-h2>账号管理</n-h2>
-      <n-button type="primary" @click="showAddModal = true">添加账号</n-button>
+      <n-button type="primary" @click="isEditing = false; resetForm(); showAddModal = true">添加账号</n-button>
     </n-space>
 
     <n-data-table
@@ -13,7 +13,7 @@
       :scroll-x="700"
     />
 
-    <n-modal v-model:show="showAddModal" preset="dialog" title="添加账号" style="width: 500px; max-width: 95vw">
+    <n-modal v-model:show="showAddModal" preset="dialog" :title="isEditing ? '编辑账号' : '添加账号'" style="width: 500px; max-width: 95vw">
       <n-form :model="form" label-placement="left" label-width="100">
         <n-form-item :label="form.auth_type === 'global_key' ? '名称 (选填)' : '名称'">
           <n-input v-model:value="form.name" :placeholder="form.auth_type === 'global_key' ? '未填则默认使用邮箱' : '账号名称'" />
@@ -40,7 +40,7 @@
       </n-form>
       <template #action>
         <n-button @click="showAddModal = false">取消</n-button>
-        <n-button type="primary" :loading="submitting" @click="handleAdd">提交</n-button>
+        <n-button type="primary" :loading="submitting" @click="handleSubmit">提交</n-button>
       </template>
     </n-modal>
 
@@ -71,6 +71,8 @@ const showFeatureModal = ref(false);
 const submitting = ref(false);
 const editingAccountId = ref<number | null>(null);
 const editFeatures = ref<string[]>([]);
+const isEditing = ref(false);
+const editingId = ref<number | null>(null);
 
 const featureOptions = [
   { label: 'Workers AI', value: 'ai' },
@@ -106,7 +108,7 @@ function resetForm() {
   form.value = { name: '', auth_type: 'token', api_token: '', api_key: '', email: '', features: ['ai', 'workers', 'browser_render', 'dns', 'storage'] };
 }
 
-async function handleAdd() {
+async function handleSubmit() {
   const nameToSubmit = form.value.name.trim();
   const authType = form.value.auth_type;
   
@@ -135,17 +137,37 @@ async function handleAdd() {
   submitting.value = true;
   try {
     const { features, ...rest } = form.value;
-    await accountStore.createAccount({
+    const payload = {
       ...rest,
       name: finalName,
       enabled_features: features.join(','),
-    });
-    message.success('账号添加成功');
+    };
+    if (isEditing.value && editingId.value !== null) {
+      await accountStore.updateAccount(editingId.value, payload);
+      message.success('账号修改成功');
+    } else {
+      await accountStore.createAccount(payload);
+      message.success('账号添加成功');
+    }
     showAddModal.value = false;
     resetForm();
   } finally {
     submitting.value = false;
   }
+}
+
+function openEditModal(row: any) {
+  isEditing.value = true;
+  editingId.value = row.id;
+  form.value = {
+    name: row.name || '',
+    auth_type: row.auth_type || 'token',
+    api_token: row.api_token || '',
+    api_key: row.api_key || '',
+    email: row.email || '',
+    features: parseFeatures(row.enabled_features),
+  };
+  showAddModal.value = true;
 }
 
 function openFeatureEditor(row: any) {
@@ -230,9 +252,10 @@ const columns: DataTableColumns<any> = [
     return h(NTag, { size: 'small', type: row.is_active ? 'success' : 'default' }, { default: () => row.is_active ? '活跃' : '未验证' });
   }},
   {
-    title: '操作', key: 'actions', width: 220,
+    title: '操作', key: 'actions', width: 260,
     render: (row) => h(NSpace, { size: 4 }, {
       default: () => [
+        h(NButton, { size: 'small', disabled: row.is_demo, onClick: () => openEditModal(row) }, { default: () => '编辑' }),
         h(NButton, { size: 'small', disabled: row.is_demo, onClick: () => openFeatureEditor(row) }, { default: () => '功能' }),
         h(NButton, { size: 'small', onClick: () => handleTest(row) }, { default: () => '测试' }),
         h(NButton, { size: 'small', type: 'error', disabled: row.is_demo, onClick: () => handleDelete(row) }, { default: () => '删除' }),

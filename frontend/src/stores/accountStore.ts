@@ -41,5 +41,10 @@ export const useAccountStore = defineStore('accounts', () => {
     await fetchAccounts();
   }
 
-  return { accounts, quota, loading, fetchAccounts, createAccount, deleteAccount, testAccount, updateFeatures };
+  async function updateAccount(id: number, input: any) {
+    await accountsApi.update(id, input);
+    await fetchAccounts();
+  }
+
+  return { accounts, quota, loading, fetchAccounts, createAccount, deleteAccount, testAccount, updateFeatures, updateAccount };
 });

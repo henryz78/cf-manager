@@ -1,6 +1,6 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import Cloudflare from 'cloudflare';
-import { getAllAccounts, createAccount, deleteAccount, getAccountById, updateAccountStatus, updateAccountId, updateAccountFeatures, AccountInput } from '../models/account';
+import { getAllAccounts, createAccount, deleteAccount, getAccountById, updateAccountStatus, updateAccountId, updateAccountFeatures, updateAccount, AccountInput } from '../models/account';
 import { encrypt, decrypt } from '../services/encryptionService';
 import { getCfClient } from '../services/cfFactory';
 import { getQuotaSummary } from '../services/quotaTracker';
@@ -44,9 +44,35 @@ router.get('/', (_req: Request, res: Response, next: NextFunction) => {
   } catch (err) { next(err); }
 });
 
+async function verifyCloudflareCredentials(auth_type: string, credentials: { api_token?: string; api_key?: string; email?: string }): Promise<void> {
+  const fetch = require('node-fetch');
+  const httpAgent = getHttpAgent();
+  const fetchOpts: any = {
+    headers: {}
+  };
+  if (httpAgent) fetchOpts.agent = httpAgent;
+
+  if (auth_type === 'token') {
+    fetchOpts.headers['Authorization'] = `Bearer ${credentials.api_token}`;
+    const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', fetchOpts);
+    if (!verifyRes.ok) {
+      const body = await verifyRes.text();
+      throw new Error(`Cloudflare API Token 验证失败 (${verifyRes.status}): ${body}`);
+    }
+  } else {
+    fetchOpts.headers['X-Auth-Email'] = credentials.email;
+    fetchOpts.headers['X-Auth-Key'] = credentials.api_key;
+    const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user', fetchOpts);
+    if (!verifyRes.ok) {
+      const body = await verifyRes.text();
+      throw new Error(`Cloudflare API Key 验证失败 (${verifyRes.status}): ${body}`);
+    }
+  }
+}
+
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, auth_type, account_id, api_token, api_key, email } = req.body;
+    const { name, auth_type, api_token, api_key, email } = req.body;
     if (!name || !auth_type) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } });
       return;
@@ -66,23 +92,13 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     // Verify credentials before saving
     try {
-      const httpAgent = getHttpAgent();
-      const opts: Record<string, any> = {};
-      if (httpAgent) opts.httpAgent = httpAgent;
-
-      let tempCf: Cloudflare;
-      if (auth_type === 'token') {
-        tempCf = new Cloudflare({ apiToken: api_token, ...opts });
-      } else {
-        tempCf = new Cloudflare({ apiEmail: email, apiKey: api_key, ...opts });
-      }
-      await tempCf.user.get();
+      await verifyCloudflareCredentials(auth_type, { api_token, api_key, email });
     } catch (e: any) {
-      res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败: ${e.message || e}` } });
+      res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: e.message || e } });
       return;
     }
 
-    const input: AccountInput = { name, auth_type, account_id, enabled_features: req.body.enabled_features };
+    const input: AccountInput = { name, auth_type, account_id: null, enabled_features: req.body.enabled_features };
     if (auth_type === 'token') {
       input.api_token = encrypt(api_token);
     } else {
@@ -91,28 +107,103 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     }
     const id = createAccount(input);
 
-    if (!account_id) {
-      try {
-        const saved = getAccountById(id);
-        if (saved) {
-          const cf = getCfClient(saved);
-          const accts: any[] = [];
-          for await (const acct of cf.accounts.list()) {
-            accts.push(acct as any);
-          }
-          if (accts.length > 0) {
-            updateAccountId(id, accts[0].id);
-            appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}"`);
-          }
-          updateAccountStatus(id, true);
+    // Auto-fetch account ID
+    try {
+      const saved = getAccountById(id);
+      if (saved) {
+        const cf = getCfClient(saved);
+        const accts: any[] = [];
+        for await (const acct of cf.accounts.list()) {
+          accts.push(acct as any);
         }
-      } catch (e) {
-        appLogger.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
+        if (accts.length > 0) {
+          updateAccountId(id, accts[0].id);
+          input.account_id = accts[0].id;
+          appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}"`);
+        }
+        updateAccountStatus(id, true);
       }
+    } catch (e) {
+      appLogger.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
     }
 
     createAuditLog(id, 'create_account', name, `auth_type=${auth_type}`, 'success');
     res.status(201).json({ id, ...input, api_token: '***', api_key: '***' });
+  } catch (err) { next(err); }
+});
+
+router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const id = parseInt(req.params.id as string, 10);
+    if (isDemoAccount(id)) {
+      res.status(403).json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可修改' } });
+      return;
+    }
+    const account = getAccountById(id);
+    if (!account) {
+      res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } });
+      return;
+    }
+
+    const { name, auth_type, api_token, api_key, email } = req.body;
+    if (!name || !auth_type) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } });
+      return;
+    }
+    if (auth_type !== 'token' && auth_type !== 'global_key') {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } });
+      return;
+    }
+    if (auth_type === 'token' && !api_token) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'api_token is required' } });
+      return;
+    }
+    if (auth_type === 'global_key' && (!api_key || !email)) {
+      res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'api_key and email are required' } });
+      return;
+    }
+
+    // Verify credentials
+    try {
+      await verifyCloudflareCredentials(auth_type, { api_token, api_key, email });
+    } catch (e: any) {
+      res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: e.message || e } });
+      return;
+    }
+
+    const input: Partial<AccountInput> = { name, auth_type };
+    if (auth_type === 'token') {
+      input.api_token = encrypt(api_token);
+      input.api_key = null;
+      input.email = null;
+    } else {
+      input.api_key = encrypt(api_key);
+      input.email = email;
+      input.api_token = null;
+    }
+
+    // Auto-fetch account_id on update
+    let fetchedAccountId: string | null = null;
+    try {
+      const cf = getCfClient({ ...account, ...input } as any);
+      const accts: any[] = [];
+      for await (const acct of cf.accounts.list()) {
+        accts.push(acct as any);
+      }
+      if (accts.length > 0) {
+        fetchedAccountId = accts[0].id;
+        appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}" during update`);
+      }
+    } catch (e) {
+      appLogger.warn(`[Account] Failed to auto-fetch account_id during update: ${e}`);
+    }
+
+    input.account_id = fetchedAccountId || account.account_id || null;
+
+    updateAccount(id, input);
+    clearCache();
+    createAuditLog(id, 'update_account', name, `auth_type=${auth_type}`, 'success');
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 
