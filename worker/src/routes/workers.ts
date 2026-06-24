@@ -426,12 +426,28 @@ app.post('/:accountId/pages/deploy', async (c) => {
   let files: Array<{ path: string; buffer: Uint8Array }> = [];
 
   if (uploadedFiles.length === 1 && uploadedFiles[0].name?.toLowerCase().endsWith('.zip')) {
-    return c.json({ error: { code: 'NOT_SUPPORTED', message: 'ZIP upload not supported in Worker version. Please extract and upload individual files.' } }, 400);
-  }
-
-  for (const f of uploadedFiles) {
-    const buf = new Uint8Array(await f.arrayBuffer());
-    files.push({ path: f.name.replace(/\\/g, '/').replace(/^\/+/, ''), buffer: buf });
+    const zipData = new Uint8Array(await uploadedFiles[0].arrayBuffer());
+    const extracted = await extractZipFiles(zipData);
+    if (extracted.length > 0) {
+      const filePaths = extracted.map(f => f.path);
+      let prefix = '';
+      const parts = filePaths[0].split('/');
+      if (parts.length > 1) {
+        const candidate = parts[0] + '/';
+        if (filePaths.every(p => p.startsWith(candidate))) {
+          prefix = candidate;
+        }
+      }
+      files = extracted.map(f => ({
+        path: prefix ? f.path.slice(prefix.length) : f.path,
+        buffer: f.buffer,
+      }));
+    }
+  } else {
+    for (const f of uploadedFiles) {
+      const buf = new Uint8Array(await f.arrayBuffer());
+      files.push({ path: f.name.replace(/\\/g, '/').replace(/^\/+/, ''), buffer: buf });
+    }
   }
 
   if (!skipCreateProject) {

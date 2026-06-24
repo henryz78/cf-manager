@@ -10,6 +10,7 @@ router.get('/', (_req, res) => {
   res.json({
     encryption_key_configured: !!config.encryptionKey,
     api_secret_configured: !!config.apiSecret,
+    demo_account_ids: config.demoAccountIds || '',
     db_path: config.dbPath,
     proxy_url: getProxyUrl(),
     proxy_enabled: isProxyEnabled(),
