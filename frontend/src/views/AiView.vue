@@ -4,44 +4,53 @@
     <div ref="chatContainer" style="flex: 1; overflow-y: auto; padding: 20px;">
       <!-- 欢迎页 -->
       <div v-if="messages.length === 0" style="text-align: center; padding: 40px 20px 40px;">
-        <!-- AI 用量统计 -->
-        <n-grid v-if="usageData.length > 0" :cols="aiGridCols" :x-gap="12" :y-gap="12" responsive="screen" style="margin-bottom: 30px; text-align: left;">
+        <!-- AI 用量统计 (compact) -->
+        <n-grid v-if="usageData.length > 0" :cols="6" :x-gap="8" :y-gap="8" responsive="screen" style="margin-bottom: 20px; text-align: left;">
           <n-gi v-for="u in usageData" :key="u.accountId">
-            <n-card size="small">
-              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <span style="font-size: 15px; font-weight: 600; color: #333;">{{ u.accountName }}</span>
-                <span style="font-size: 13px; color: #666;">
-                  <b style="color: #2080f0;">{{ u.totalNeurons.toLocaleString() }}</b> / 10,000
-                </span>
-              </div>
-              <n-progress
-                type="line"
-                :percentage="Math.min(u.totalNeurons / 100, 100)"
-                :color="u.totalNeurons > 8000 ? '#e03050' : '#2080f0'"
-                :rail-color="'#e8e8e8'"
-                :height="6"
-                :show-indicator="false"
-              />
-              <div v-if="u.models.length > 0" style="margin-top: 12px;">
-                <div
-                  style="cursor: pointer; display: flex; align-items: center; gap: 4px; color: #888; font-size: 13px; user-select: none;"
-                  @click="u.expanded = !u.expanded"
-                >
-                  <span style="font-size: 11px; transition: transform 0.2s; display: inline-block;" :style="{ transform: u.expanded ? 'rotate(90deg)' : 'rotate(0deg)' }">▶</span>
-                  模型明细 ({{ u.models.length }})
+            <n-popover trigger="click" placement="bottom">
+              <template #trigger>
+                <div class="ai-compact-card">
+                  <span class="ai-compact-card__name" :title="u.accountName">{{ u.accountName.length > 8 ? u.accountName.slice(0, 7) + '…' : u.accountName }}</span>
+                  <n-progress
+                    type="line"
+                    :percentage="Math.min(u.totalNeurons / 100, 100)"
+                    :color="u.totalNeurons > 8000 ? '#e03050' : '#2080f0'"
+                    :rail-color="'#e8e8e8'"
+                    :height="6"
+                    :show-indicator="false"
+                    :style="{ flex: 1 }"
+                  />
+                  <span class="ai-compact-card__metric">{{ u.totalNeurons.toLocaleString() }}</span>
                 </div>
-                <div v-show="u.expanded" style="margin-top: 8px;">
+              </template>
+              <div style="min-width: 260px; padding: 4px 0;">
+                <div style="font-weight: bold; margin-bottom: 10px;">{{ u.accountName }}</div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
+                  <span>神经元总量</span>
+                  <span><b style="color: #2080f0;">{{ u.totalNeurons.toLocaleString() }}</b> / 10,000</span>
+                </div>
+                <n-progress
+                  type="line"
+                  :percentage="Math.min(u.totalNeurons / 100, 100)"
+                  :color="u.totalNeurons > 8000 ? '#e03050' : '#2080f0'"
+                  :rail-color="'#e8e8e8'"
+                  :height="12"
+                  :show-indicator="false"
+                  style="margin-bottom: 10px;"
+                />
+                <div v-if="u.models.length > 0" style="border-top: 1px solid #f0f0f0; padding-top: 8px;">
+                  <div style="font-size: 12px; color: #888; margin-bottom: 6px;">模型明细 ({{ u.models.length }})</div>
                   <div
                     v-for="m in u.models"
                     :key="m.modelId"
-                    style="display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; color: #555; border-bottom: 1px solid #f0f0f0;"
+                    style="display: flex; justify-content: space-between; padding: 3px 0; font-size: 13px; color: #555; border-bottom: 1px solid #f8f8f8;"
                   >
                     <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ m.modelId.replace(/^@cf\//, '') }}</span>
                     <span style="flex-shrink: 0; margin-left: 12px;">{{ m.neurons.toLocaleString() }} / {{ m.requests.toLocaleString() }} 请求</span>
                   </div>
                 </div>
               </div>
-            </n-card>
+            </n-popover>
           </n-gi>
         </n-grid>
         <h1 style="font-size: 32px; margin-bottom: 36px; color: #1a1a1a; font-weight: 600;">有什么我能帮你的吗？</h1>
@@ -395,6 +404,35 @@ watch(selectedAccount, () => {
 
 .ai-select-account {
   width: 180px;
+}
+
+.ai-compact-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 180px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #e0e0e6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  background-color: #fff;
+}
+.ai-compact-card:hover { background-color: #f5f5f5; }
+.ai-compact-card__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70px;
+  flex-shrink: 0;
+}
+.ai-compact-card__metric {
+  font-size: 11px;
+  color: #666;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
 @media (max-width: 768px) {

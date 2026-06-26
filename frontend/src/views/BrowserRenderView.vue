@@ -2,26 +2,46 @@
   <div>
     <n-h2>浏览器渲染</n-h2>
 
-    <!-- 用量统计 (按账户) -->
-    <n-grid v-if="usageList.length > 0" :cols="brGridCols" :x-gap="12" :y-gap="12" responsive="screen" style="margin-bottom: 16px;">
+    <!-- 用量统计 (compact) -->
+    <n-grid v-if="usageList.length > 0" :cols="6" :x-gap="8" :y-gap="8" responsive="screen" style="margin-bottom: 16px;">
       <n-gi v-for="u in usageList" :key="u.accountId">
-        <n-card size="small">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-            <span style="font-size: 14px; font-weight: 600; color: #333;">{{ u.accountName }}</span>
-            <span style="font-size: 13px; color: #666;">
-              <b :style="{ color: u.used > 500 ? '#e03050' : '#2080f0' }">{{ formatSeconds(u.used) }}</b>
-              / {{ formatSeconds(u.limit) }}
-            </span>
+        <n-popover trigger="click" placement="bottom">
+          <template #trigger>
+            <div class="br-compact-card">
+              <span class="br-compact-card__name" :title="u.accountName">{{ u.accountName.length > 8 ? u.accountName.slice(0, 7) + '…' : u.accountName }}</span>
+              <n-progress
+                type="line"
+                :percentage="Math.min(u.used / u.limit * 100, 100)"
+                :color="u.used > 500 ? '#e03050' : '#2080f0'"
+                :rail-color="'#e8e8e8'"
+                :height="6"
+                :show-indicator="false"
+                :style="{ flex: 1 }"
+              />
+              <span class="br-compact-card__metric" :style="{ color: u.used > 500 ? '#e03050' : '#666' }">{{ formatSeconds(u.used) }}</span>
+            </div>
+          </template>
+          <div style="min-width: 220px; padding: 4px 0;">
+            <div style="font-weight: bold; margin-bottom: 10px;">{{ u.accountName }}</div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
+              <span>已用 / 总量</span>
+              <span><b :style="{ color: u.used > 500 ? '#e03050' : '#2080f0' }">{{ formatSeconds(u.used) }}</b> / {{ formatSeconds(u.limit) }}</span>
+            </div>
+            <n-progress
+              type="line"
+              :percentage="Math.min(u.used / u.limit * 100, 100)"
+              :color="u.used > 500 ? '#e03050' : '#2080f0'"
+              :rail-color="'#e8e8e8'"
+              :height="12"
+              :show-indicator="false"
+              style="margin-bottom: 10px;"
+            />
+            <div style="display: flex; justify-content: space-between; font-size: 13px;">
+              <span>使用率</span>
+              <span>{{ Math.min(Math.round(u.used / u.limit * 100), 100) }}%</span>
+            </div>
           </div>
-          <n-progress
-            type="line"
-            :percentage="Math.min(u.used / u.limit * 100, 100)"
-            :color="u.used > 500 ? '#e03050' : '#2080f0'"
-            :rail-color="'#e8e8e8'"
-            :height="6"
-            :show-indicator="false"
-          />
-        </n-card>
+        </n-popover>
       </n-gi>
     </n-grid>
 
@@ -209,3 +229,34 @@ onMounted(() => {
   fetchUsage();
 });
 </script>
+
+<style scoped>
+.br-compact-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 180px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #e0e0e6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  background-color: #fff;
+}
+.br-compact-card:hover { background-color: #f5f5f5; }
+.br-compact-card__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70px;
+  flex-shrink: 0;
+}
+.br-compact-card__metric {
+  font-size: 11px;
+  color: #666;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+</style>

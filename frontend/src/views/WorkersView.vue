@@ -8,33 +8,44 @@
       </n-space>
     </n-space>
 
-    <!-- Workers Usage per Account -->
-    <n-space v-if="usageData.length" style="margin-bottom: 12px" align="center">
-      <n-card v-for="u in usageData" :key="u.accountId" size="small" style="min-width: 200px">
-        <n-space vertical :size="4">
-          <n-text depth="3" style="font-size: 12px">{{ u.accountName }}</n-text>
-          <n-space align="center" :size="8">
-            <n-progress
-              type="circle"
-              :percentage="calcUsagePercentage(u)"
-              :stroke-width="8"
-              :style="{ width: '36px', height: '36px' }"
-              :status="calcUsagePercentage(u) > 90 ? 'error' : calcUsagePercentage(u) > 70 ? 'warning' : 'success'"
-            />
-            <n-space vertical :size="2">
-              <n-text strong style="font-size: 14px">{{ formatNumber(u.requests) }} <n-text depth="3" style="font-size: 12px">/ 100,000</n-text></n-text>
-              <n-text depth="3" style="font-size: 11px">请求 · 错误 {{ formatNumber(u.errors) }} · CPU {{ formatCpuTime(u.cpuTimeMs) }}</n-text>
-            </n-space>
-          </n-space>
-        </n-space>
-      </n-card>
-      <n-tooltip trigger="hover">
-        <template #trigger>
-          <n-icon size="14" style="opacity: 0.5; cursor: help"><HelpCircleOutline /></n-icon>
-        </template>
-        今日 Workers 请求用量（Free 计划每日 100,000 次限制），数据来自 Cloudflare GraphQL Analytics API
-      </n-tooltip>
-    </n-space>
+    <!-- Workers Usage per Account (compact) -->
+    <n-grid v-if="usageData.length" :cols="6" :x-gap="8" :y-gap="8" responsive="screen" style="margin-bottom: 12px;">
+      <n-gi v-for="u in usageData" :key="u.accountId">
+        <n-popover trigger="click" placement="bottom">
+          <template #trigger>
+            <div class="worker-compact-card">
+              <span class="worker-compact-card__name" :title="u.accountName">{{ u.accountName.length > 8 ? u.accountName.slice(0, 7) + '…' : u.accountName }}</span>
+              <n-progress
+                type="line"
+                :percentage="calcUsagePercentage(u)"
+                :height="6"
+                :show-indicator="false"
+                :status="calcUsagePercentage(u) > 90 ? 'error' : calcUsagePercentage(u) > 70 ? 'warning' : 'success'"
+                :style="{ flex: 1 }"
+              />
+              <span class="worker-compact-card__metric">{{ formatNumber(u.requests) }}</span>
+            </div>
+          </template>
+          <div style="min-width: 220px; padding: 4px 0;">
+            <div style="font-weight: bold; margin-bottom: 10px;">{{ u.accountName }}</div>
+            <div style="display: flex; justify-content: space-between; margin-bottom: 6px; font-size: 13px;">
+              <span>请求数</span><span>{{ formatNumber(u.requests) }} / 100,000</span>
+            </div>
+            <n-progress type="line" :percentage="calcUsagePercentage(u)" :height="12" :show-indicator="false"
+              :status="calcUsagePercentage(u) > 90 ? 'error' : calcUsagePercentage(u) > 70 ? 'warning' : 'success'" style="margin-bottom: 10px;" />
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+              <span>错误</span><span>{{ formatNumber(u.errors) }}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px;">
+              <span>CPU 耗时</span><span>{{ formatCpuTime(u.cpuTimeMs) }}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px;">
+              <span>子请求</span><span>{{ formatNumber(u.subrequests) }}</span>
+            </div>
+          </div>
+        </n-popover>
+      </n-gi>
+    </n-grid>
 
     <n-data-table
       :columns="columns"
@@ -1414,3 +1425,34 @@ onMounted(() => {
   loadUsage();
 });
 </script>
+
+<style scoped>
+.worker-compact-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 180px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid #e0e0e6;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.2s;
+  background-color: #fff;
+}
+.worker-compact-card:hover { background-color: #f5f5f5; }
+.worker-compact-card__name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 70px;
+  flex-shrink: 0;
+}
+.worker-compact-card__metric {
+  font-size: 11px;
+  color: #666;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+</style>
