@@ -1,53 +1,36 @@
 <template>
   <n-popover trigger="click" :show="showPopover" @update:show="showPopover = $event" placement="bottom">
     <template #trigger>
-      <div class="compact-card" @click="showPopover = !showPopover">
+      <div class="compact-card" :class="{ 'compact-card--no-resources': !hasResources }" @click="showPopover = true">
         <span class="compact-card__name" :title="accountName">{{ displayName }}</span>
-        <span class="compact-card__dots">
-          <n-tooltip
-            v-for="(item, idx) in orderedResources"
-            :key="item.resource.resource"
-            trigger="hover"
-          >
+        <div class="compact-card__dots">
+          <n-tooltip v-for="item in orderedResources" :key="item.resource" trigger="hover">
             <template #trigger>
-              <span
-                class="compact-card__dot"
-                :style="{ backgroundColor: dotColor(item.resource) }"
-              />
+              <span class="compact-card__dot" :style="{ backgroundColor: dotColor(item) }" />
             </template>
-            {{ item.label }}: {{ calcPercentage(item.resource) }}%
+            {{ resourceLabel(item.resource) }}: {{ calcPercentage(item) }}%
           </n-tooltip>
-          <span
-            v-for="n in emptyDots"
-            :key="'empty-' + n"
-            class="compact-card__dot"
-            style="background-color: #ccc"
-          />
-        </span>
+          <span v-for="i in emptyDots" :key="'empty-' + i" class="compact-card__dot" style="background-color: #ccc" />
+        </div>
       </div>
     </template>
+
     <div class="compact-card__popover">
       <div class="compact-card__popover-title">{{ accountName }}</div>
-      <div
-        v-for="item in orderedResources"
-        :key="item.resource.resource"
-        class="compact-card__popover-row"
-      >
+      <div v-for="item in orderedResources" :key="item.resource" class="compact-card__popover-row">
         <div class="compact-card__popover-label">
-          <span>{{ item.label }}</span>
-          <span class="compact-card__popover-value">{{ formatValue(item.resource) }}</span>
+          <span>{{ resourceLabel(item.resource) }}</span>
+          <span class="compact-card__popover-value">{{ formatValue(item) }}</span>
         </div>
         <n-progress
           type="line"
-          :percentage="calcPercentage(item.resource)"
+          :percentage="calcPercentage(item)"
           :height="14"
           :show-indicator="false"
-          :status="progressStatus(item.resource)"
+          :status="progressStatus(item)"
         />
       </div>
-      <div v-if="orderedResources.length === 0" style="color: #999; font-size: 13px;">
-        暂无资源数据
-      </div>
+      <div v-if="!hasResources" style="color: #999; font-size: 13px;">暂无资源数据</div>
     </div>
   </n-popover>
 </template>
@@ -76,16 +59,16 @@ const resourceLabels: Record<string, string> = {
   browser_render_seconds: '浏览器渲染',
 };
 
-function resourceLabel(resource: string): string {
+function resourceLabel(resource: string) {
   return resourceLabels[resource] || resource;
 }
 
-function calcPercentage(r: Resource): number {
+function calcPercentage(r: Resource) {
   if (!r.limit) return 0;
   return Math.min(100, Math.round(((r.count || 0) / r.limit) * 100));
 }
 
-function formatValue(r: Resource): string {
+function formatValue(r: Resource) {
   if (r.resource === 'browser_render_seconds') {
     const m = Math.floor(r.count / 60);
     const s = Math.round(r.count % 60);
@@ -96,7 +79,7 @@ function formatValue(r: Resource): string {
   return `${(r.count || 0).toLocaleString()} / ${(r.limit || 0).toLocaleString()}`;
 }
 
-function dotColor(r: Resource): string {
+function dotColor(r: Resource) {
   const pct = calcPercentage(r);
   if (pct > 100) return '#c03030';
   if (pct > 90) return '#d03050';
@@ -112,23 +95,17 @@ function progressStatus(r: Resource): 'error' | 'warning' | 'success' {
 }
 
 const orderedResources = computed(() => {
-  const map = new Map<string, Resource>();
-  for (const r of props.resources) {
-    map.set(r.resource, r);
-  }
-  return resourceOrder
-    .filter((key) => map.has(key))
-    .map((key) => ({
-      resource: map.get(key)!,
-      label: resourceLabel(key),
-    }));
+  const map = new Map(props.resources.map(r => [r.resource, r]));
+  return resourceOrder.filter(key => map.has(key)).map(key => map.get(key)!);
 });
 
 const emptyDots = computed(() => Math.max(0, 3 - orderedResources.value.length));
 
+const hasResources = computed(() => props.resources && props.resources.length > 0);
+
 const displayName = computed(() => {
-  if (props.accountName.length <= 8) return props.accountName;
-  return props.accountName.slice(0, 8) + '...';
+  const name = props.accountName;
+  return name.length > 8 ? name.slice(0, 7) + '…' : name;
 });
 </script>
 
@@ -139,29 +116,38 @@ const displayName = computed(() => {
   justify-content: space-between;
   width: 120px;
   height: 28px;
-  padding: 4px;
+  padding: 0 4px;
+  border: 1px solid #e0e0e6;
   border-radius: 4px;
   cursor: pointer;
-  background-color: rgba(0, 0, 0, 0.03);
   transition: background-color 0.2s;
+  background-color: #fff;
 }
 
 .compact-card:hover {
-  background-color: rgba(0, 0, 0, 0.08);
+  background-color: #f5f5f5;
+}
+
+.compact-card--no-resources {
+  opacity: 0.6;
+  background-color: #f5f5f5;
+}
+
+.compact-card--no-resources:hover {
+  background-color: #e8e8e8;
 }
 
 .compact-card__name {
   font-size: 12px;
-  max-width: 70px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  max-width: 70px;
 }
 
 .compact-card__dots {
   display: flex;
   gap: 3px;
-  align-items: center;
 }
 
 .compact-card__dot {
@@ -172,12 +158,14 @@ const displayName = computed(() => {
 }
 
 .compact-card__popover {
-  width: 300px;
+  min-width: 280px;
+  padding: 4px 0;
 }
 
 .compact-card__popover-title {
   font-weight: bold;
   margin-bottom: 12px;
+  font-size: 14px;
 }
 
 .compact-card__popover-row {
@@ -191,8 +179,8 @@ const displayName = computed(() => {
 .compact-card__popover-label {
   display: flex;
   justify-content: space-between;
-  font-size: 13px;
   margin-bottom: 4px;
+  font-size: 13px;
 }
 
 .compact-card__popover-value {

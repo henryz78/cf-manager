@@ -1,28 +1,37 @@
 <template>
   <div>
-    <n-space align="center">
-      <n-h2 style="margin: 0">仪表盘</n-h2>
-      <n-tag size="small" type="info">今日额度</n-tag>
+    <n-space align="center" justify="space-between" style="width: 100%">
+      <n-space align="center">
+        <n-h2 style="margin: 0">仪表盘</n-h2>
+        <n-tag size="small" type="info">今日额度</n-tag>
+      </n-space>
+      <n-space align="center">
+        <n-select
+          v-model:value="sortBy"
+          :options="sortOptions"
+          style="width: 160px"
+        />
+        <n-input
+          v-model:value="searchQuery"
+          placeholder="搜索账户..."
+          clearable
+          style="width: 200px"
+        />
+      </n-space>
+    </n-space>
+
+    <n-space v-if="globalStats.totalAccounts > 0" style="margin: 12px 0">
+      <n-tag>共 {{ globalStats.totalAccounts }} 账户</n-tag>
+      <n-tag v-if="globalStats.nearExhaustion > 0" type="warning">
+        {{ globalStats.nearExhaustion }} 快耗尽
+      </n-tag>
+      <n-tag type="info">AI 总量 {{ globalStats.aiNeuronsTotal.toLocaleString() }}</n-tag>
     </n-space>
 
     <n-spin :show="quotaStore.loading" style="margin-top: 16px">
-      <n-grid v-if="quotaWithResources.length > 0" :cols="gridCols" :x-gap="12" :y-gap="12" responsive="screen">
+      <n-grid v-if="quotaWithResources.length > 0" cols="6 s:4 m:6 l:8 xl:10" :x-gap="8" :y-gap="8" responsive="screen">
         <n-gi v-for="acct in quotaWithResources" :key="acct.accountId">
-          <n-card :title="acct.accountName" size="small">
-            <div v-for="r in acct.resources" :key="r.resource" style="margin-bottom: 14px;">
-              <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
-                <n-text strong>{{ resourceLabel(r.resource) }}</n-text>
-                <n-text depth="3">{{ formatValue(r) }}</n-text>
-              </div>
-              <n-progress
-                type="line"
-                :percentage="calcPercentage(r)"
-                :height="14"
-                :show-indicator="false"
-                :status="calcPercentage(r) > 90 ? 'error' : calcPercentage(r) > 70 ? 'warning' : 'success'"
-              />
-            </div>
-          </n-card>
+          <CompactAccountCard :account-name="acct.accountName" :resources="acct.resources" />
         </n-gi>
       </n-grid>
       <n-empty v-if="!quotaStore.loading && quotaWithResources.length === 0" description="暂无账户数据" />
@@ -46,43 +55,85 @@ import { useQuotaStore } from '../stores/quotaStore';
 import apiClient from '../api/client';
 import type { DataTableColumns } from 'naive-ui';
 import { formatCN } from '../utils/dateFormat';
+import { calcPercentage } from '../utils/quota';
+import CompactAccountCard from '../components/CompactAccountCard.vue';
 
 const quotaStore = useQuotaStore();
-const quotaWithResources = computed(() =>
-  quotaStore.quota.filter((acct: any) => acct.resources && acct.resources.length > 0)
-);
-const gridCols = computed(() => {
-  const count = quotaWithResources.value.length;
-  return `1 s:${Math.min(count, 2)} m:${Math.min(count, 3)} l:${Math.min(count, 5)}`;
+const searchQuery = ref('');
+const sortBy = ref('name');
+
+const sortOptions = [
+  { label: '名称 A-Z', value: 'name' },
+  { label: '名称 Z-A', value: 'name-desc' },
+  { label: '使用率 高→低', value: 'usage-desc' },
+  { label: '使用率 低→高', value: 'usage-asc' },
+];
+
+function getMaxUsage(account: any) {
+  return Math.max(
+    0,
+    ...account.resources.map((r: any) => {
+      if (!r.limit) return 0;
+      return Math.min(100, Math.round(((r.count || 0) / r.limit) * 100));
+    }),
+  );
+}
+
+const quotaWithResources = computed(() => {
+  let accounts = quotaStore.quota.filter(
+    (acct: any) => acct.resources && acct.resources.length > 0,
+  );
+
+  if (searchQuery.value) {
+    const query = searchQuery.value.toLowerCase();
+    accounts = accounts.filter((acct: any) =>
+      acct.accountName.toLowerCase().includes(query),
+    );
+  }
+
+  accounts = [...accounts].sort((a: any, b: any) => {
+    switch (sortBy.value) {
+      case 'name':
+        return a.accountName.localeCompare(b.accountName);
+      case 'name-desc':
+        return b.accountName.localeCompare(a.accountName);
+      case 'usage-desc':
+        return getMaxUsage(b) - getMaxUsage(a);
+      case 'usage-asc':
+        return getMaxUsage(a) - getMaxUsage(b);
+      default:
+        return 0;
+    }
+  });
+
+  return accounts;
 });
+
+const globalStats = computed(() => {
+  const accounts = quotaStore.quota.filter(
+    (acct: any) => acct.resources && acct.resources.length > 0,
+  );
+  const totalAccounts = accounts.length;
+
+  const nearExhaustion = accounts.filter((acct: any) =>
+    acct.resources.some((r: any) => {
+      const pct = calcPercentage(r);
+      return pct > 90;
+    }),
+  ).length;
+
+  const aiNeuronsTotal = accounts.reduce((sum: number, acct: any) => {
+    const aiResource = acct.resources.find(
+      (r: any) => r.resource === 'ai_neurons',
+    );
+    return sum + (aiResource?.count || 0);
+  }, 0);
+
+  return { totalAccounts, nearExhaustion, aiNeuronsTotal };
+});
+
 const auditLogs = ref<any[]>([]);
 const loadingLogs = ref(false);
-
-const resourceLabels: Record<string, string> = {
-  workers_requests: 'Workers 请求',
-  ai_neurons: 'AI 神经元',
-  browser_render_seconds: '浏览器渲染',
-};
-
-function resourceLabel(resource: string) {
-  return resourceLabels[resource] || resource;
-}
-
-function formatValue(r: any) {
-  if (r.resource === 'browser_render_seconds') {
-    const m = Math.floor(r.count / 60);
-    const s = Math.round(r.count % 60);
-    const lm = Math.floor(r.limit / 60);
-    const ls = Math.round(r.limit % 60);
-    return `${m > 0 ? m + '分' : ''}${s}秒 / ${lm}分${ls > 0 ? ls + '秒' : ''}`;
-  }
-  return `${(r.count || 0).toLocaleString()} / ${(r.limit || 0).toLocaleString()}`;
-}
-
-function calcPercentage(r: any) {
-  if (!r.limit) return 0;
-  return Math.min(100, Math.round(((r.count || 0) / r.limit) * 100));
-}
 
 const logColumns: DataTableColumns<any> = [
   { title: '时间', key: 'created_at', width: 180, render: (row) => formatCN(row.created_at) },
