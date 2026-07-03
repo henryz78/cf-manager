@@ -18,6 +18,7 @@ import externalBrowserRenderRouter from './routes/externalBrowserRender';
 import { getQuotaSummary, syncUsageFromCloudflare } from './services/quotaTracker';
 import { getRecentLogs } from './models/auditLog';
 import { initScheduler } from './services/taskScheduler';
+import { initBrowserRateLimiter } from './services/browserRateLimiter';
 import { v1RequestLogger } from './middleware/v1Logger';
 import { apiRequestLogger } from './middleware/apiLogger';
 import { appLogger } from './services/logger';
@@ -69,6 +70,7 @@ app.use(errorHandler);
 async function start() {
   initDb();
   initScheduler();
+  initBrowserRateLimiter();
   app.listen(config.port, () => {
     appLogger.info(`Server running on port ${config.port}`);
   });

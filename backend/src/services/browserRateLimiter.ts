@@ -11,6 +11,7 @@ interface AccountBucket {
 }
 
 const buckets = new Map<number, AccountBucket>();
+let dailyResetTimer: ReturnType<typeof setTimeout> | null = null;
 
 function ensureBuckets(): void {
   const accounts = getActiveAccountsByFeature('browser_render');
@@ -33,10 +34,64 @@ export function markAccountExhausted(accountId: number): void {
   appLogger.info(`[BrowserRL] Account ${accountId} marked as exhausted (CF daily limit)`);
 }
 
+function resetAllExhausted(): void {
+  let count = 0;
+  for (const bucket of buckets.values()) {
+    if (bucket.exhausted) {
+      bucket.exhausted = false;
+      count++;
+    }
+  }
+  if (count > 0) {
+    clearCache();
+    appLogger.info(`[BrowserRL] Daily reset: cleared exhausted flag on ${count} account(s)`);
+  }
+}
+
+function msUntilNextUTCMidnight(): number {
+  const now = new Date();
+  const tomorrow = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
+  return tomorrow.getTime() - now.getTime();
+}
+
+function scheduleDailyReset(): void {
+  if (dailyResetTimer) clearTimeout(dailyResetTimer);
+
+  const ms = msUntilNextUTCMidnight();
+  dailyResetTimer = setTimeout(() => {
+    resetAllExhausted();
+    scheduleDailyReset();
+  }, ms);
+
+  const resetAt = new Date(Date.now() + ms);
+  appLogger.info(`[BrowserRL] Next daily reset scheduled at ${resetAt.toISOString()} (in ${Math.round(ms / 60000)} min)`);
+}
+
+export function initBrowserRateLimiter(): void {
+  scheduleDailyReset();
+}
+
 export type AcquireResult =
   | { type: 'ok'; account: Account }
   | { type: 'rate_limited'; waitMs: number }
   | { type: 'all_exhausted' };
+
+export interface BrowserRenderStatus {
+  available_accounts: number;
+  total_accounts: number;
+  token_interval_ms: number;
+}
+
+export function getBrowserRenderStatus(): BrowserRenderStatus {
+  ensureBuckets();
+  const accounts = getActiveAccountsByFeature('browser_render');
+  let available = 0;
+  for (const account of accounts) {
+    const bucket = buckets.get(account.id);
+    if (bucket && !bucket.exhausted) available++;
+  }
+  return { available_accounts: available, total_accounts: accounts.length, token_interval_ms: TOKEN_INTERVAL_MS };
+}
 
 export function acquireToken(): AcquireResult {
   ensureBuckets();

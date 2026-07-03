@@ -3,7 +3,7 @@
     <n-h2>DNS 管理</n-h2>
     <n-grid :cols="24" :x-gap="12" :y-gap="12" responsive="screen" item-responsive>
       <!-- 左侧域名列表 -->
-      <n-gi :span="24 m:6">
+      <n-gi span="24 m:6">
         <n-card title="域名列表" size="small">
           <n-list hoverable clickable>
             <n-list-item
@@ -21,7 +21,7 @@
       </n-gi>
 
       <!-- 右侧记录表格 -->
-      <n-gi :span="24 m:18">
+      <n-gi span="24 m:18">
         <n-card :title="dnsStore.currentDomain ? `${dnsStore.currentDomain} - DNS 记录` : 'DNS 记录'" size="small">
           <template #header-extra>
             <n-button size="small" type="primary" :disabled="!dnsStore.currentDomain" @click="showAddModal = true">添加记录</n-button>

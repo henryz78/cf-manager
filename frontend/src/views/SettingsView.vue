@@ -22,15 +22,19 @@
       </n-spin>
     </n-card>
 
-    <n-card title="代理设置" size="small" style="margin-bottom: 16px">
+    <n-card v-if="!isWorkerPlatform" title="代理设置" size="small" style="margin-bottom: 16px">
       <n-space vertical>
+        <n-space align="center">
+          <n-switch :value="proxyEnabled" @update:value="toggleProxy" :loading="proxyToggling" />
+          <n-text :depth="proxyEnabled ? 1 : 3">{{ proxyEnabled ? '代理已启用' : '代理已关闭' }}</n-text>
+        </n-space>
         <n-input-group>
           <n-input v-model:value="proxyUrl" placeholder="例如: http://127.0.0.1:7890 或 socks5://127.0.0.1:1080" clearable style="flex: 1" />
           <n-button type="info" :loading="proxyTesting" :disabled="!proxyUrl" @click="testProxy">测试</n-button>
           <n-button type="primary" :loading="proxySaving" @click="saveProxy">保存</n-button>
         </n-input-group>
         <n-text depth="3" style="font-size: 12px">
-          支持 HTTP/HTTPS 和 SOCKS5 代理协议，留空则不使用代理。所有 Cloudflare API 请求（SDK + 原生 fetch）均会通过此代理。
+          支持 HTTP/HTTPS 和 SOCKS5 代理协议。所有 Cloudflare API 请求（SDK + 原生 fetch）均会通过此代理。
         </n-text>
       </n-space>
     </n-card>
@@ -42,7 +46,7 @@
     </n-card>
 
     <!-- 定时任务 -->
-    <n-card size="small">
+    <n-card v-if="!isWorkerPlatform" size="small">
       <template #header>
         定时任务
         <n-tag size="small" type="warning" style="margin-left: 8px; vertical-align: middle">任务逻辑待实现</n-tag>
@@ -57,7 +61,7 @@
     </n-card>
 
     <!-- 添加/编辑任务 Modal -->
-    <n-modal v-model:show="showTaskModal" preset="dialog" :title="editingTaskId ? '编辑任务' : '添加任务'" style="width: 550px; max-width: 95vw">
+    <n-modal v-if="!isWorkerPlatform" v-model:show="showTaskModal" preset="dialog" :title="editingTaskId ? '编辑任务' : '添加任务'" style="width: 550px; max-width: 95vw">
       <n-form label-placement="left" label-width="100">
         <n-form-item label="任务名称">
           <n-input v-model:value="taskForm.name" placeholder="例如: 每日配额报告" />
@@ -116,11 +120,11 @@
     </n-modal>
 
     <!-- 执行历史 Drawer -->
-    <n-drawer v-model:show="showHistoryDrawer" :width="drawerWidth(520)" placement="right">
+    <n-drawer v-if="!isWorkerPlatform" v-model:show="showHistoryDrawer" :width="drawerWidth(520)" placement="right">
       <n-drawer-content :title="`执行历史 - ${historyTaskName}`" closable>
         <n-spin :show="historyLoading">
           <n-timeline>
-            <n-timeline-item v-for="h in taskHistory" :key="h.id" :type="h.status === 'success' ? 'success' : h.status === 'error' ? 'error' : 'info'" :title="h.status" :content="h.detail || '-'" :time="h.started_at ? new Date(h.started_at).toLocaleString() : '-'" />
+            <n-timeline-item v-for="h in taskHistory" :key="h.id" :type="h.status === 'success' ? 'success' : h.status === 'error' ? 'error' : 'info'" :title="h.status" :content="h.detail || '-'" :time="h.started_at ? formatCN(h.started_at) : '-'" />
           </n-timeline>
           <n-empty v-if="!taskHistory.length && !historyLoading" description="暂无执行记录" />
         </n-spin>
@@ -137,6 +141,7 @@ import { settingsApi } from '../api/settings';
 import { tasksApi } from '../api/storage';
 import apiClient from '../api/client';
 import { useAccountStore } from '../stores/accountStore';
+import { formatCN } from '../utils/dateFormat';
 
 const message = useMessage();
 
@@ -148,8 +153,12 @@ const loading = ref(false);
 const clearing = ref(false);
 const settings = ref<any>({});
 const proxyUrl = ref('');
+const proxyEnabled = ref(false);
 const proxySaving = ref(false);
 const proxyTesting = ref(false);
+const proxyToggling = ref(false);
+
+const isWorkerPlatform = computed(() => settings.value.platform === 'cloudflare-workers');
 
 async function fetchSettings() {
   loading.value = true;
@@ -157,6 +166,7 @@ async function fetchSettings() {
     const { data } = await settingsApi.get();
     settings.value = data;
     proxyUrl.value = data.proxy_url || '';
+    proxyEnabled.value = !!data.proxy_enabled;
   } catch {
     settings.value = {};
   } finally {
@@ -164,10 +174,24 @@ async function fetchSettings() {
   }
 }
 
+async function toggleProxy(enabled: boolean) {
+  proxyToggling.value = true;
+  try {
+    const { data } = await apiClient.put('/settings/proxy', { proxy_enabled: enabled });
+    proxyEnabled.value = !!data.proxy_enabled;
+    message.success(enabled ? '代理已启用' : '代理已关闭');
+  } catch {
+    message.error('切换代理失败');
+  } finally {
+    proxyToggling.value = false;
+  }
+}
+
 async function saveProxy() {
   proxySaving.value = true;
   try {
-    await apiClient.put('/settings/proxy', { proxy_url: proxyUrl.value });
+    const { data } = await apiClient.put('/settings/proxy', { proxy_url: proxyUrl.value });
+    proxyEnabled.value = !!data.proxy_enabled;
     message.success('代理设置已保存');
   } catch {
     message.error('保存代理设置失败');
@@ -339,9 +363,11 @@ const taskColumns: DataTableColumns<any> = [
   },
 ];
 
-onMounted(() => {
-  fetchSettings();
-  fetchTasks();
+onMounted(async () => {
+  await fetchSettings();
+  if (!isWorkerPlatform.value) {
+    fetchTasks();
+  }
   accountStore.fetchAccounts();
 });
 </script>

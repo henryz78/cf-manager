@@ -2,6 +2,17 @@
 
 一站式 Cloudflare 多账户管理平台。提供可视化界面统一管理 Workers、Pages、DNS、KV、D1、R2、AI 推理、浏览器渲染等服务，同时暴露 OpenAI 兼容 API 供外部项目调用。
 
+## 在线演示
+
+| | |
+|---|---|
+| 地址 | [https://mgrcf.pages.dev/admin/](https://mgrcf.pages.dev/admin/) |
+| 密码 | `mgrcfbest` |
+
+> 演示站部署在 Cloudflare Pages + D1，无需 Docker。根路径显示伪装的 nginx 欢迎页，管理界面通过 `/admin/` 访问。
+
+---
+
 ## 功能特性
 
 ### 多账户管理
@@ -55,6 +66,7 @@
 ### 安全特性
 - API Token 加密存储（AES 加密）
 - 可选的 API Secret 认证保护管理界面
+- 管理界面隐藏在 `/admin/` 路径，根路径伪装为 nginx 默认页
 - 操作审计日志
 
 ---
@@ -69,7 +81,19 @@
 
 ## 快速开始
 
-### Docker 部署（推荐）
+> 两种部署方式可选，详见 [部署文档](docs/deploy.md)
+
+### Cloudflare Pages 部署（零成本）
+
+```bash
+cd worker
+npm install
+npm run build    # 构建 → worker/cf-manager.zip
+```
+
+将 `cf-manager.zip` 上传至 Cloudflare Pages Dashboard，配置 D1 绑定和环境变量即可。管理界面通过 `/admin/` 路径访问。
+
+### Docker 部署
 
 ```bash
 # 1. 克隆项目
@@ -81,12 +105,13 @@ cp .env.example .env
 
 # 3. 编辑 .env，至少设置 ENCRYPTION_KEY
 #    可选设置 API_SECRET（管理界面登录密码）、PROXY_URL（代理地址）
+#    可选设置 BASE_URL（前端访问路径，如 /admin/）
 
 # 4. 一键部署
 chmod +x deploy.sh
 ./deploy.sh
 
-# 5. 访问 http://localhost:3000
+# 5. 访问 http://localhost:3000（或 http://localhost:3000/admin/ 如果设置了 BASE_URL）
 ```
 
 ### 环境变量
@@ -97,6 +122,7 @@ chmod +x deploy.sh
 | `API_SECRET` | 否 | 管理界面访问密码，留空则无需登录 |
 | `PROXY_URL` | 否 | HTTP/SOCKS5 代理地址，如 `http://127.0.0.1:7890` 或 `socks5://127.0.0.1:1080` |
 | `APP_PORT` | 否 | 对外暴露端口，默认 `3000` |
+| `BASE_URL` | 否 | 前端访问路径，如 `/admin/`，默认 `/`（仅 Docker 部署需要，Worker 版固定为 `/admin/`） |
 
 ### 本地开发
 
@@ -116,12 +142,12 @@ npm run dev
 
 ## 技术栈
 
-| 层级 | 技术 |
-|---|---|
-| 前端 | Vue 3 + Naive UI + Pinia + Vue Router |
-| 后端 | Express 5 + TypeScript + Cloudflare SDK |
-| 数据库 | SQLite (better-sqlite3) |
-| 部署 | Docker Compose (nginx + Node.js) |
+| 层级 | Docker 版 | Worker 版 |
+|---|---|---|
+| 前端 | Vue 3 + Naive UI + Pinia | 同左 |
+| 后端 | Express 5 + Cloudflare SDK | Hono + Cloudflare REST API |
+| 数据库 | SQLite (better-sqlite3) | Cloudflare D1 |
+| 部署 | Docker Compose | Cloudflare Pages |
 
 ---
 
@@ -144,11 +170,16 @@ cf-manager/
 │       ├── views/           # 页面组件
 │       ├── stores/          # Pinia 状态管理
 │       └── utils/           # 工具函数
+├── worker/                  # Cloudflare Pages 部署版
+│   ├── src/                 # Hono API 路由 + D1 模型
+│   ├── build.js             # 一键构建脚本
+│   └── wrangler.toml        # Wrangler 配置
 ├── docker/                  # Docker 构建配置
 │   ├── backend/Dockerfile
 │   └── frontend/
 │       ├── Dockerfile
-│       └── nginx.conf
+│       ├── nginx.conf.template  # Nginx 配置模板（支持 BASE_URL）
+│       └── entrypoint.sh        # 容器启动脚本
 ├── docs/                    # 文档
 │   ├── api-v1.md            # 外部 API 接口文档
 │   └── account-auth.md      # 账户认证方式说明
