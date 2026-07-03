@@ -45,7 +45,7 @@ apiClient.interceptors.response.use(
       error.errorMessage = body?.message || error?.message || '网络请求失败';
     }
 
-    if (error?.response?.status === 401 || (error?.response?.status === 403 && errObj?.code !== 'R2_NOT_ENABLED')) {
+    if (error?.response?.status === 401 || (error?.response?.status === 403 && errObj?.code !== 'R2_NOT_ENABLED' && errObj?.code !== 10042)) {
       localStorage.removeItem('api_token');
       window.dispatchEvent(new Event('auth-expired'));
     }

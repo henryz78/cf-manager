@@ -56,7 +56,7 @@
           <n-select v-model:value="deployForm.accountId" :options="accountOptions" />
         </n-form-item>
         <n-form-item label="名称">
-          <n-input v-model:value="deployForm.name" :placeholder="deployType === 'pages' ? 'Pages 项目名称' : 'Worker 名称'" />
+          <n-input v-model:value="deployForm.name" :placeholder="deployType === 'pages' ? 'Pages 项目名称' : 'Worker 名称'" :disabled="isRedeploy" />
         </n-form-item>
         <template v-if="deployType === 'worker'">
           <n-form-item label="部署方式">
@@ -79,6 +79,7 @@
             <n-button>选择 .zip 文件</n-button>
           </n-upload>
           <span v-if="selectedZipFile" style="margin-left: 8px; font-size: 12px; color: #999">{{ selectedZipFile.name }}</span>
+          <n-text v-else-if="!isRedeploy" depth="3" style="margin-left: 8px; font-size: 12px">不选则创建空项目</n-text>
         </n-form-item>
       </n-form>
       <template #action>
@@ -515,7 +516,6 @@ import type { DataTableColumns } from 'naive-ui';
 import { useWorkerStore } from '../stores/workerStore';
 import { useAccountStore } from '../stores/accountStore';
 import { workersApi } from '../api/workers';
-import { dnsApi } from '../api/dns';
 
 const workerStore = useWorkerStore();
 const accountStore = useAccountStore();
@@ -638,11 +638,18 @@ const bindingSaving = ref(false);
 const bindingForm = ref({ type: 'kv_namespaces', name: '', value: '' });
 const bindingResources = ref<any[]>([]);
 const bindingResourcesLoading = ref(false);
-const bindingTypeOptions = [
-  { label: 'KV 命名空间', value: 'kv_namespaces' },
-  { label: 'D1 数据库', value: 'd1_databases' },
-  { label: 'R2 存储桶', value: 'r2_buckets' },
-];
+const r2Available = ref(true);  // 恢复默认值
+const bindingTypeOptions = computed(() => {
+  const options = [
+    { label: 'KV 命名空间', value: 'kv_namespaces' },
+    { label: 'D1 数据库', value: 'd1_databases' },
+  ];
+  if (r2Available.value) {
+    options.push({ label: 'R2 存储桶', value: 'r2_buckets' });
+  }
+  return options;
+});
+
 const bindingResourceOptions = computed(() =>
   bindingResources.value.map((r: any) => ({
     label: r.title || r.name || r.id,
@@ -657,7 +664,14 @@ function parseBindings(configs: any): any[] {
   const typeLabels: Record<string, string> = { kv_namespaces: 'KV', d1_databases: 'D1', r2_buckets: 'R2', services: 'Service', queue_producers: 'Queue', durable_object_namespaces: 'DO', browsers: 'Browser', analytics_engine_datasets: 'Analytics' };
   for (const [typeKey, label] of Object.entries(typeLabels)) {
     const bindings = production[typeKey];
-    if (bindings && typeof bindings === 'object') {
+    if (!bindings) continue;
+    if (Array.isArray(bindings)) {
+      for (const item of bindings) {
+        const name = item.name || item.binding || '';
+        const value = item.namespace_id || item.id || item.bucket_name || item.dataset || item.service || JSON.stringify(item);
+        list.push({ type: label, typeKey, name, value });
+      }
+    } else if (typeof bindings === 'object') {
       for (const [name, val] of Object.entries(bindings as Record<string, any>)) {
         const value = val?.namespace_id || val?.id || val?.name || val?.dataset || val?.service || JSON.stringify(val);
         list.push({ type: label, typeKey, name, value });
@@ -673,11 +687,23 @@ const resourceNameMap = ref<Record<string, string>>({});
 async function buildResourceNameMap() {
   const map: Record<string, string> = {};
   try {
-    const [kvResp, d1Resp, r2Resp] = await Promise.all([
+    const promises = [
       workersApi.getKvNamespaces(settingsAccountId.value).catch(() => null),
       workersApi.getD1Databases(settingsAccountId.value).catch(() => null),
-      workersApi.getR2Buckets(settingsAccountId.value).catch(() => null),
-    ]);
+    ];
+    // Only fetch R2 if available
+    if (r2Available.value) {
+      promises.push(workersApi.getR2Buckets(settingsAccountId.value, { _silent: true } as any).catch((err: any) => {
+        const msg = err?.response?.data?.error?.message || err?.message || '';
+        if (msg.includes('10042') || msg.includes('Please enable R2')) {
+          r2Available.value = false;
+        }
+        return null;
+      }));
+    } else {
+      promises.push(Promise.resolve(null));
+    }
+    const [kvResp, d1Resp, r2Resp] = await Promise.all(promises);
     const kvList = Array.isArray(kvResp?.data) ? kvResp.data : [];
     const d1List = Array.isArray(d1Resp?.data) ? d1Resp.data : [];
     const r2List = Array.isArray(r2Resp?.data) ? r2Resp.data : [];
@@ -702,8 +728,12 @@ async function loadBindings() {
       workersApi.getPagesProject(settingsAccountId.value, settingsWorkerName.value),
       buildResourceNameMap(),
     ]);
+    console.log('[Bindings] deployment_configs:', JSON.stringify(data?.deployment_configs));
     bindingsList.value = parseBindings(data?.deployment_configs);
-  } catch { bindingsList.value = []; }
+  } catch (e) {
+    console.error('[Bindings] loadBindings failed:', e);
+    bindingsList.value = [];
+  }
   finally { bindingsLoading.value = false; }
 }
 
@@ -715,6 +745,11 @@ async function openBindingModal() {
 
 async function onBindingTypeChange(type: string) {
   bindingForm.value.value = '';
+  if (type === 'r2_buckets' && !r2Available.value) {
+    message.warning('当前账户未启用 R2，请先在 Cloudflare 控制台启用');
+    bindingForm.value.type = 'kv_namespaces';
+    return;
+  }
   await loadBindingResources(type);
 }
 
@@ -725,9 +760,18 @@ async function loadBindingResources(type: string) {
     let resp: any;
     if (type === 'kv_namespaces') resp = await workersApi.getKvNamespaces(settingsAccountId.value);
     else if (type === 'd1_databases') resp = await workersApi.getD1Databases(settingsAccountId.value);
-    else if (type === 'r2_buckets') resp = await workersApi.getR2Buckets(settingsAccountId.value);
+    else if (type === 'r2_buckets') {
+      resp = await workersApi.getR2Buckets(settingsAccountId.value, { _silent: true } as any);
+    }
     bindingResources.value = Array.isArray(resp?.data) ? resp.data : [];
-  } catch { bindingResources.value = []; }
+  } catch (err: any) {
+    const msg = err?.response?.data?.error?.message || err?.message || '';
+    if (type === 'r2_buckets' && (msg.includes('10042') || msg.includes('Please enable R2'))) {
+      message.warning('当前账户未启用 R2，请先在 Cloudflare 控制台启用');
+      r2Available.value = false;
+    }
+    bindingResources.value = [];
+  }
   finally { bindingResourcesLoading.value = false; }
 }
 
@@ -780,12 +824,14 @@ const accountOptions = computed(() =>
 );
 
 // ============ Deploy ============
+const isRedeploy = ref(false);
 function openDeploy(type?: 'worker' | 'pages', prefillName?: string, prefillAccountId?: number) {
   deployType.value = type || 'worker';
   selectedFile.value = null;
   selectedZipFile.value = null;
   deploySource.value = 'file';
   deployUrl.value = '';
+  isRedeploy.value = !!prefillName;
   deployForm.value = {
     accountId: prefillAccountId || accountStore.accounts[0]?.id || null,
     name: prefillName || '',
@@ -799,7 +845,7 @@ async function handleDeploy() {
   if (!deployForm.value.accountId || !deployForm.value.name) { message.warning('请填写完整信息'); return; }
   if (deployType.value === 'worker' && deploySource.value === 'file' && !selectedFile.value) { message.warning('请选择脚本文件'); return; }
   if (deployType.value === 'worker' && deploySource.value === 'url' && !deployUrl.value) { message.warning('请输入 JS URL'); return; }
-  if (deployType.value === 'pages' && !selectedZipFile.value) { message.warning('请选择 ZIP 文件'); return; }
+  if (deployType.value === 'pages' && isRedeploy.value && !selectedZipFile.value) { message.warning('重新部署必须上传 ZIP 文件'); return; }
   deploying.value = true;
   try {
     if (deployType.value === 'worker') {
@@ -810,8 +856,9 @@ async function handleDeploy() {
       }
       message.success('Worker 部署成功');
     } else {
-      await workersApi.deployPages(deployForm.value.accountId, deployForm.value.name, [selectedZipFile.value!]);
-      message.success('Pages 部署成功');
+      const files = selectedZipFile.value ? [selectedZipFile.value] : [];
+      await workersApi.deployPages(deployForm.value.accountId, deployForm.value.name, files, isRedeploy.value);
+      message.success(selectedZipFile.value ? 'Pages 部署成功' : 'Pages 项目创建成功');
     }
     showDeployModal.value = false;
     workerStore.fetchWorkers();
@@ -857,7 +904,26 @@ async function openSettings(row: any) {
     loadPagesProject();
     loadPagesDomains();
     loadPagesDeployments();
+    checkR2Availability();
     loadBindings();
+  }
+}
+
+async function checkR2Availability() {
+  try {
+    const { data } = await workersApi.getR2Buckets(settingsAccountId.value, { _silent: true });
+    if (data?.r2_not_enabled) {
+      r2Available.value = false;
+    } else {
+      r2Available.value = true;
+    }
+  } catch (err: any) {
+    const msg = err?.response?.data?.error?.message || err?.errorMessage || err?.message || '';
+    if (msg.includes('10042') || msg.includes('enable R2') || msg.includes('R2_NOT_ENABLED')) {
+      r2Available.value = false;
+    } else {
+      r2Available.value = true;
+    }
   }
 }
 
@@ -1051,7 +1117,7 @@ async function openPagesDomainModal() {
   showPagesDomainModal.value = true;
   managedDomainsLoading.value = true;
   try {
-    const { data } = await dnsApi.getDomains();
+    const { data } = await workersApi.getZones(settingsAccountId.value);
     managedDomains.value = Array.isArray(data) ? data : [];
   } catch { managedDomains.value = []; }
   finally { managedDomainsLoading.value = false; }
@@ -1172,7 +1238,15 @@ const deploymentColumns: DataTableColumns<any> = [
 const pagesDomainColumns: DataTableColumns<any> = [
   { title: '域名', key: 'name' },
   { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { size: 'small', type: row.status === 'active' ? 'success' : 'warning' }, { default: () => row.status || '-' }) },
-  { title: '操作', key: 'actions', width: 80, render: (row) => h(NButton, { size: 'tiny', type: 'error', onClick: () => handleRemovePagesDomain(row) }, { default: () => '删除' }) },
+  {
+    title: '操作', key: 'actions', width: 120,
+    render: (row) => h(NSpace, null, {
+      default: () => [
+        h(NButton, { size: 'tiny', type: 'info', onClick: () => window.open(`https://${row.name}`, '_blank') }, { default: () => '打开' }),
+        h(NButton, { size: 'tiny', type: 'error', onClick: () => handleRemovePagesDomain(row) }, { default: () => '删除' }),
+      ]
+    })
+  },
 ];
 
 // Pages env var columns

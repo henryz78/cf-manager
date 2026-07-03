@@ -1,7 +1,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
-import { getAccountById } from '../models/account';
 import { createAuditLog } from '../models/auditLog';
+import { getAccountOr404 } from './routeUtils';
 import {
   createKvNamespace, deleteKvNamespace, listKvKeys, getKvValue, putKvValue, deleteKvKey, bulkDeleteKvKeys,
   createD1Database, deleteD1Database, listD1Tables, getD1TableSchema, executeD1Query,
@@ -14,15 +14,6 @@ const router = Router();
 
 function p(req: Request, key: string): string {
   return req.params[key] as string;
-}
-
-function getAccountOr404(req: Request, res: Response) {
-  const account = getAccountById(parseInt(p(req, 'accountId'), 10));
-  if (!account) {
-    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } });
-    return null;
-  }
-  return account;
 }
 
 // ============ KV Namespaces ============

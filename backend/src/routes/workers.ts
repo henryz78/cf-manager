@@ -3,6 +3,7 @@ import multer from 'multer';
 import AdmZip from 'adm-zip';
 import { getActiveAccounts, getAccountById } from '../models/account';
 import { createAuditLog } from '../models/auditLog';
+import { getAccountOr404 } from './routeUtils';
 import {
   listWorkers, listPages, deployWorker, deployWorkerFromUrl, deleteWorker, deletePagesProject, getWorkerLogs, deployPages,
   // Secrets
@@ -28,20 +29,11 @@ import {
   // Usage
   getWorkersUsageToday,
 } from '../services/workerService';
+import { getAllZones } from '../services/accountRouter';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 1 * 1024 * 1024 } });
 const uploadPages = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024, files: 100 } });
 const router = Router();
-
-// Helper to get account or 404
-function getAccountOr404(req: Request, res: Response) {
-  const account = getAccountById(parseInt(req.params.accountId as string, 10));
-  if (!account) {
-    res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Account not found' } });
-    return null;
-  }
-  return account;
-}
 
 // ============ List all ============
 router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
@@ -139,41 +131,44 @@ async function handlePagesDeploy(req: Request, res: Response, next: NextFunction
     if (!account) return;
     const name = req.body.name as string;
     if (!name) { res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Project name is required' } }); return; }
-    if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
-      res.status(400).json({ error: { code: 'NO_FILES', message: 'At least one file is required' } }); return;
-    }
-    const uploadedFiles = req.files as Express.Multer.File[];
-    console.log(`[Pages Deploy Route] Received ${uploadedFiles.length} files: ${uploadedFiles.map(f => f.originalname).join(', ')}`);
+    
+    const uploadedFiles = req.files as Express.Multer.File[] | undefined;
     let files: Array<{ path: string; buffer: Buffer }> = [];
+    
     // Check if it's a single zip file
-    if (uploadedFiles.length === 1 && uploadedFiles[0].originalname?.toLowerCase().endsWith('.zip')) {
-      const zip = new AdmZip(uploadedFiles[0].buffer);
-      const entries = zip.getEntries();
-      const filePaths = entries.filter(e => !e.isDirectory).map(e => e.entryName.replace(/\\/g, '/'));
-      let prefix = '';
-      if (filePaths.length > 0) {
-        const parts = filePaths[0].split('/');
-        if (parts.length > 1) {
-          const candidate = parts[0] + '/';
-          if (filePaths.every(p => p.startsWith(candidate))) {
-            prefix = candidate;
+    if (uploadedFiles && uploadedFiles.length > 0) {
+      console.log(`[Pages Deploy Route] Received ${uploadedFiles.length} files: ${uploadedFiles.map(f => f.originalname).join(', ')}`);
+      if (uploadedFiles.length === 1 && uploadedFiles[0].originalname?.toLowerCase().endsWith('.zip')) {
+        const zip = new AdmZip(uploadedFiles[0].buffer);
+        const entries = zip.getEntries();
+        const filePaths = entries.filter(e => !e.isDirectory).map(e => e.entryName.replace(/\\/g, '/'));
+        let prefix = '';
+        if (filePaths.length > 0) {
+          const parts = filePaths[0].split('/');
+          if (parts.length > 1) {
+            const candidate = parts[0] + '/';
+            if (filePaths.every(p => p.startsWith(candidate))) {
+              prefix = candidate;
+            }
           }
         }
-      }
-      for (const entry of entries) {
-        if (!entry.isDirectory) {
-          const p = entry.entryName.replace(/\\/g, '/');
-          files.push({ path: prefix ? p.slice(prefix.length) : p, buffer: entry.getData() });
+        for (const entry of entries) {
+          if (!entry.isDirectory) {
+            const p = entry.entryName.replace(/\\/g, '/');
+            files.push({ path: prefix ? p.slice(prefix.length) : p, buffer: entry.getData() });
+          }
         }
+      } else {
+        files = uploadedFiles.map(f => ({
+          path: (f as any).originalname || f.fieldname,
+          buffer: f.buffer,
+        }));
       }
-    } else {
-      files = uploadedFiles.map(f => ({
-        path: (f as any).originalname || f.fieldname,
-        buffer: f.buffer,
-      }));
     }
-    const result = await deployPages(account, name, files);
-    createAuditLog(account.id, 'deploy_pages', name, `${files.length} files`, 'success');
+    
+    const skipCreateProject = req.body.skipCreateProject === 'true' || req.body.skipCreateProject === true;
+    const result = await deployPages(account, name, files, skipCreateProject);
+    createAuditLog(account.id, 'deploy_pages', name, files.length > 0 ? `${files.length} files` : 'empty project', 'success');
     console.log(`[Pages Deploy Route] Success for ${name}`);
     res.status(201).json(result);
   } catch (err: any) {
@@ -439,6 +434,22 @@ router.get('/:accountId/resources/r2', async (req: Request, res: Response, next:
     if (!account) return;
     const result = await listR2Buckets(account);
     res.json(result);
+  } catch (err: any) {
+    const msg = `${err?.message || ''} ${err?.status || ''} ${err?.error?.code || ''}`;
+    if (msg.includes('10042') || msg.includes('enable R2') || msg.includes('Please enable R2')) {
+      res.json({ r2_not_enabled: true, buckets: [] });
+      return;
+    }
+    next(err);
+  }
+});
+
+router.get('/:accountId/resources/zones', async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const account = getAccountOr404(req, res);
+    if (!account) return;
+    const allZones = await getAllZones();
+    res.json(allZones.filter(z => z.cfAccountId === account.id));
   } catch (err) { next(err); }
 });
 

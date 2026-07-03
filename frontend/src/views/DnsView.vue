@@ -32,6 +32,7 @@
             :loading="dnsStore.loading"
             size="small"
             :bordered="false"
+            :scroll-x="680"
           />
         </n-card>
       </n-gi>
@@ -116,7 +117,7 @@ async function handleProxyToggle(row: any, proxied: boolean) {
 const recordColumns: DataTableColumns<any> = [
   { title: '类型', key: 'type', width: 80, render: (row) => h(NTag, { size: 'small', type: 'info' }, { default: () => row.type }) },
   { title: '名称', key: 'name', width: 180, ellipsis: { tooltip: true } },
-  { title: '内容', key: 'content', ellipsis: { tooltip: true } },
+  { title: '内容', key: 'content', minWidth: 180, ellipsis: { tooltip: true } },
   { title: 'TTL', key: 'ttl', width: 80, render: (row) => row.ttl === 1 ? '自动' : row.ttl },
   {
     title: '代理', key: 'proxied', width: 80,

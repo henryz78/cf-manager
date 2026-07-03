@@ -1,22 +1,12 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { selectBestAccount, getAccountsByPriority, clearCache } from '../services/accountRouter';
-import { Account } from '../models/account';
 import { getAvailableModels } from '../services/aiService';
-import { decrypt } from '../services/encryptionService';
+import { getAuthHeaders } from '../services/cfFactory';
 import { createAuditLog } from '../models/auditLog';
 import { setQuota } from '../models/quotaUsage';
 import { proxyFetch } from '../services/proxyService';
 
 const router = Router();
-
-function getAuthHeaders(account: Account): Record<string, string> {
-  if (account.auth_type === 'token') {
-    if (!account.api_token) throw new Error(`Account ${account.id} is missing api_token`);
-    return { Authorization: `Bearer ${decrypt(account.api_token)}` };
-  }
-  if (!account.email || !account.api_key) throw new Error(`Account ${account.id} is missing email/api_key`);
-  return { 'X-Auth-Email': account.email, 'X-Auth-Key': decrypt(account.api_key) };
-}
 
 function isNeuronLimitError(text: string): boolean {
   return text.includes('4006') || text.includes('daily free allocation') || text.includes('neuron limit');

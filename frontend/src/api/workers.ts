@@ -14,9 +14,10 @@ export const workersApi = {
   deployFromUrl: (accountId: number, name: string, url: string) => {
     return apiClient.post(`/workers/${accountId}/workers`, { name, url });
   },
-  deployPages: (accountId: number, name: string, files: File[]) => {
+  deployPages: (accountId: number, name: string, files: File[], skipCreateProject?: boolean) => {
     const formData = new FormData();
     formData.append('name', name);
+    if (skipCreateProject) formData.append('skipCreateProject', 'true');
     files.forEach(f => formData.append('files', f, f.name));
     return apiClient.post(`/workers/${accountId}/pages/deploy`, formData, { timeout: 120000 });
   },
@@ -78,7 +79,8 @@ export const workersApi = {
   // Resources (for Pages bindings)
   getKvNamespaces: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/kv`),
   getD1Databases: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/d1`),
-  getR2Buckets: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/r2`),
+  getR2Buckets: (accountId: number, config?: any) => apiClient.get(`/workers/${accountId}/resources/r2`, config),
+  getZones: (accountId: number) => apiClient.get(`/workers/${accountId}/resources/zones`, { timeout: 60000 }),
   updatePagesBindings: (accountId: number, name: string, deploymentConfigs: any) =>
     apiClient.put(`/workers/${accountId}/pages/${name}/bindings`, { deployment_configs: deploymentConfigs }),
 

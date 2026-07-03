@@ -1,22 +1,6 @@
 import { Account } from '../models/account';
-import { getCfClient } from './cfFactory';
-import { decrypt } from './encryptionService';
+import { getCfClient, getAuthHeaders } from './cfFactory';
 import { proxyFetch } from './proxyService';
-
-// 获取 REST API 认证头
-function getAuthHeaders(account: Account): Record<string, string> {
-  if (account.auth_type === 'token') {
-    if (!account.api_token) throw new Error(`Account ${account.id} is missing api_token`);
-    return { 'Authorization': `Bearer ${decrypt(account.api_token)}` };
-  } else {
-    if (!account.api_key) throw new Error(`Account ${account.id} is missing api_key`);
-    if (!account.email) throw new Error(`Account ${account.id} is missing email`);
-    return {
-      'X-Auth-Email': account.email,
-      'X-Auth-Key': decrypt(account.api_key),
-    };
-  }
-}
 
 export async function getAvailableModels(account: Account, taskFilter?: string): Promise<any[]> {
   if (!account.account_id) {
