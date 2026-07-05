@@ -123,6 +123,57 @@
       </template>
     </n-modal>
 
+    <!-- Catalog Sources -->
+    <n-card title="Catalog 源管理" size="small" style="margin-bottom: 16px">
+      <template #header-extra>
+        <n-button size="small" type="primary" @click="showAddSource = true">添加源</n-button>
+      </template>
+      <n-spin :show="sourceLoading">
+        <n-list hoverable>
+          <n-list-item v-for="s in catalogSources" :key="s.id">
+            <div style="display: flex; justify-content: space-between; align-items: center; width: 100%">
+              <div>
+                <n-space align="center">
+                  <n-tag v-if="s.is_default" size="tiny" type="primary">默认</n-tag>
+                  <n-tag :type="s.enabled ? 'success' : 'default'" size="tiny">{{ s.enabled ? '启用' : '禁用' }}</n-tag>
+                  <span>{{ s.name }}</span>
+                  <span style="color: var(--text-color-3); font-size: 12px">{{ s.url }}</span>
+                </n-space>
+                <div style="font-size: 12px; color: var(--text-color-3); margin-top: 4px">
+                  <span v-if="s.last_status === 'ok'">✓ {{ s.last_synced }}</span>
+                  <span v-else-if="s.last_status === 'error'" style="color: var(--error-color)">✗ {{ s.last_error }}</span>
+                  <span v-else>待同步</span>
+                </div>
+              </div>
+              <n-space>
+                <n-button size="tiny" @click="toggleSource(s)">{{ s.enabled ? '禁用' : '启用' }}</n-button>
+                <n-button v-if="!s.is_default" size="tiny" type="error" quaternary @click="deleteSource(s)">删除</n-button>
+              </n-space>
+            </div>
+          </n-list-item>
+        </n-list>
+        <n-empty v-if="!catalogSources.length && !sourceLoading" description="暂无源" />
+      </n-spin>
+    </n-card>
+
+    <!-- Add Source Modal -->
+    <n-modal v-model:show="showAddSource" preset="card" title="添加 Catalog 源" style="width: 400px; max-width: 95vw">
+      <n-form label-placement="top" size="small">
+        <n-form-item label="URL" required>
+          <n-input v-model:value="newSourceUrl" placeholder="https://..." />
+        </n-form-item>
+        <n-form-item label="别名" required>
+          <n-input v-model:value="newSourceName" placeholder="如：社区源" />
+        </n-form-item>
+      </n-form>
+      <template #footer>
+        <n-space justify="end">
+          <n-button @click="showAddSource = false">取消</n-button>
+          <n-button type="primary" :loading="addingSource" @click="addSource">添加</n-button>
+        </n-space>
+      </template>
+    </n-modal>
+
     <!-- 执行历史 Drawer -->
     <n-drawer v-if="!isWorkerPlatform" v-model:show="showHistoryDrawer" :width="drawerWidth(520)" placement="right">
       <n-drawer-content :title="`执行历史 - ${historyTaskName}`" closable>
@@ -146,6 +197,7 @@ import { tasksApi } from '../api/storage';
 import apiClient from '../api/client';
 import { useAccountStore } from '../stores/accountStore';
 import { formatCN } from '../utils/dateFormat';
+import { storeApi } from '../api/store';
 
 const message = useMessage();
 
@@ -367,11 +419,60 @@ const taskColumns: DataTableColumns<any> = [
   },
 ];
 
+// ============ Catalog Sources ============
+const sourceLoading = ref(false);
+const catalogSources = ref<any[]>([]);
+const showAddSource = ref(false);
+const newSourceUrl = ref('');
+const newSourceName = ref('');
+const addingSource = ref(false);
+
+async function loadSources() {
+  sourceLoading.value = true;
+  try {
+    const { data } = await storeApi.getSources();
+    catalogSources.value = data as any[];
+  } catch {} finally {
+    sourceLoading.value = false;
+  }
+}
+
+async function addSource() {
+  if (!newSourceUrl.value || !newSourceName.value) return;
+  addingSource.value = true;
+  try {
+    await storeApi.addSource(newSourceUrl.value, newSourceName.value);
+    message.success('添加成功');
+    showAddSource.value = false;
+    newSourceUrl.value = '';
+    newSourceName.value = '';
+    await loadSources();
+  } catch {} finally {
+    addingSource.value = false;
+  }
+}
+
+async function toggleSource(s: any) {
+  try {
+    await storeApi.updateSource(s.id, { enabled: s.enabled ? 0 : 1 });
+    await loadSources();
+  } catch {}
+}
+
+async function deleteSource(s: any) {
+  try {
+    await storeApi.deleteSource(s.id);
+    message.success('已删除');
+    await loadSources();
+  } catch {}
+}
+
 onMounted(async () => {
   await fetchSettings();
   if (!isWorkerPlatform.value) {
     fetchTasks();
   }
   accountStore.fetchAccounts();
+  loadSources();
 });
 </script>

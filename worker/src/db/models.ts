@@ -281,3 +281,75 @@ export async function getOptimisticMapD1(db: D1Database, resource: string): Prom
   for (const r of results) map.set(r.account_id, r.optimistic || 0);
   return map;
 }
+
+// ============ Catalog Sources ============
+
+export interface CatalogSource {
+  id: number;
+  url: string;
+  name: string;
+  is_default: number;
+  enabled: number;
+  last_synced: string | null;
+  last_status: string;
+  last_error: string | null;
+  etag: string | null;
+  created_at: string;
+}
+
+export async function getCatalogSources(db: D1Database): Promise<CatalogSource[]> {
+  const { results } = await db.prepare('SELECT * FROM catalog_sources ORDER BY is_default DESC, id ASC').all<CatalogSource>();
+  return results;
+}
+
+export async function getEnabledCatalogSources(db: D1Database): Promise<CatalogSource[]> {
+  const { results } = await db.prepare('SELECT * FROM catalog_sources WHERE enabled = 1 ORDER BY is_default DESC, id ASC').all<CatalogSource>();
+  return results;
+}
+
+export async function getCatalogSourceById(db: D1Database, id: number): Promise<CatalogSource | null> {
+  return db.prepare('SELECT * FROM catalog_sources WHERE id = ?').bind(id).first<CatalogSource>();
+}
+
+export async function getDefaultCatalogSource(db: D1Database): Promise<CatalogSource | null> {
+  return db.prepare('SELECT * FROM catalog_sources WHERE is_default = 1').first<CatalogSource>();
+}
+
+export async function createCatalogSource(db: D1Database, data: {
+  url: string; name: string; is_default?: number;
+}): Promise<number> {
+  const res = await db.prepare(
+    'INSERT INTO catalog_sources (url, name, is_default) VALUES (?, ?, ?)'
+  ).bind(data.url, data.name, data.is_default || 0).run();
+  return res.meta.last_row_id;
+}
+
+export async function updateCatalogSource(db: D1Database, id: number, data: Partial<{
+  url: string; name: string; enabled: number; last_synced: string;
+  last_status: string; last_error: string | null; etag: string | null;
+}>): Promise<void> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  for (const [key, val] of Object.entries(data)) {
+    if (val !== undefined) {
+      sets.push(`${key} = ?`);
+      vals.push(val);
+    }
+  }
+  if (sets.length === 0) return;
+  vals.push(id);
+  await db.prepare(`UPDATE catalog_sources SET ${sets.join(', ')} WHERE id = ?`).bind(...vals).run();
+}
+
+export async function deleteCatalogSource(db: D1Database, id: number): Promise<void> {
+  await db.prepare('DELETE FROM catalog_sources WHERE id = ? AND is_default = 0').bind(id).run();
+}
+
+export async function ensureDefaultCatalogSource(db: D1Database, url: string, name: string): Promise<void> {
+  const existing = await getDefaultCatalogSource(db);
+  if (!existing) {
+    await db.prepare(
+      'INSERT INTO catalog_sources (url, name, is_default) VALUES (?, ?, 1)'
+    ).bind(url, name).run();
+  }
+}
