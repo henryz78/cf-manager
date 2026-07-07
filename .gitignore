@@ -16,6 +16,8 @@ backups/
 *.sw?
 
 docs/specs
+docs/superpowers/
+reg/
 worker/public/
 worker/cf-manager.zip
 
