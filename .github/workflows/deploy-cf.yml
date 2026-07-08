@@ -76,18 +76,30 @@ jobs:
 
       - name: Mask secrets and export to env
         run: |
-          echo "::add-mask::${{ github.event.inputs.cf_api_token }}"
-          echo "::add-mask::${{ github.event.inputs.cf_global_key }}"
-          echo "::add-mask::${{ github.event.inputs.cf_email }}"
-          echo "::add-mask::${{ github.event.inputs.encryption_key }}"
-          echo "::add-mask::${{ github.event.inputs.api_secret }}"
+          CF_TOKEN="${{ secrets.CLOUDFLARE_API_TOKEN || vars.CLOUDFLARE_API_TOKEN || github.event.inputs.cf_api_token }}"
+          CF_KEY="${{ secrets.CLOUDFLARE_API_KEY || vars.CLOUDFLARE_API_KEY || secrets.CF_API_KEY || vars.CF_API_KEY || secrets.CF_GLOBAL_KEY || vars.CF_GLOBAL_KEY || github.event.inputs.cf_global_key || github.event.inputs.cf_api_key }}"
+          CF_MAIL="${{ secrets.CLOUDFLARE_EMAIL || vars.CLOUDFLARE_EMAIL || secrets.CF_EMAIL || vars.CF_EMAIL || github.event.inputs.cf_email }}"
+          ENC_KEY="${{ secrets.ENCRYPTION_KEY || vars.ENCRYPTION_KEY || github.event.inputs.encryption_key }}"
+          API_SEC="${{ secrets.API_SECRET || vars.API_SECRET || github.event.inputs.api_secret }}"
+          DEMO_M="${{ secrets.DEMO_MODE || vars.DEMO_MODE || github.event.inputs.demo_mode || 'false' }}"
+          
+          [ -n "$CF_TOKEN" ] && echo "::add-mask::$CF_TOKEN"
+          [ -n "$CF_KEY" ] && echo "::add-mask::$CF_KEY"
+          [ -n "$CF_MAIL" ] && echo "::add-mask::$CF_MAIL"
+          [ -n "$ENC_KEY" ] && echo "::add-mask::$ENC_KEY"
+          [ -n "$API_SEC" ] && echo "::add-mask::$API_SEC"
+          
           # 仅在非空时导出：避免 wrangler 读到「已设置但为空」的 CLOUDFLARE_API_TOKEN
-          [ -n "${{ github.event.inputs.cf_api_token }}" ] && echo "CLOUDFLARE_API_TOKEN=${{ github.event.inputs.cf_api_token }}" >> $GITHUB_ENV
-          [ -n "${{ github.event.inputs.cf_global_key }}" ] && echo "CLOUDFLARE_GLOBAL_KEY=${{ github.event.inputs.cf_global_key }}" >> $GITHUB_ENV
-          [ -n "${{ github.event.inputs.cf_global_key }}" ] && echo "CLOUDFLARE_API_KEY=${{ github.event.inputs.cf_global_key }}" >> $GITHUB_ENV
-          [ -n "${{ github.event.inputs.cf_email }}" ] && echo "CLOUDFLARE_EMAIL=${{ github.event.inputs.cf_email }}" >> $GITHUB_ENV
-          echo "ENCRYPTION_KEY=${{ github.event.inputs.encryption_key }}" >> $GITHUB_ENV
-          echo "API_SECRET=${{ github.event.inputs.api_secret }}" >> $GITHUB_ENV
+          [ -n "$CF_TOKEN" ] && echo "CLOUDFLARE_API_TOKEN=$CF_TOKEN" >> $GITHUB_ENV
+          [ -n "$CF_KEY" ] && echo "CLOUDFLARE_GLOBAL_KEY=$CF_KEY" >> $GITHUB_ENV
+          [ -n "$CF_KEY" ] && echo "CLOUDFLARE_API_KEY=$CF_KEY" >> $GITHUB_ENV
+          [ -n "$CF_MAIL" ] && echo "CLOUDFLARE_EMAIL=$CF_MAIL" >> $GITHUB_ENV
+          echo "ENCRYPTION_KEY=$ENC_KEY" >> $GITHUB_ENV
+          echo "API_SECRET=$API_SEC" >> $GITHUB_ENV
+          echo "DEMO_MODE=$DEMO_M" >> $GITHUB_ENV
+          echo "PROJECT_NAME=${{ secrets.PROJECT_NAME || vars.PROJECT_NAME || github.event.inputs.project_name || 'cfmgr' }}" >> $GITHUB_ENV
+          echo "D1_DATABASE_NAME=${{ secrets.D1_DATABASE_NAME || vars.D1_DATABASE_NAME || github.event.inputs.d1_database_name || 'cfmgr' }}" >> $GITHUB_ENV
+          echo "KV_NAMESPACE_NAME=${{ secrets.KV_NAMESPACE_NAME || vars.KV_NAMESPACE_NAME || github.event.inputs.kv_namespace_name || 'cfmgr' }}" >> $GITHUB_ENV
 
       - name: Validate credentials
         run: |
@@ -109,8 +121,8 @@ jobs:
       - name: Deploy
         uses: ./.github/actions/deploy-cf
         with:
-          project_name: ${{ github.event.inputs.project_name }}
-          d1_database_name: ${{ github.event.inputs.d1_database_name }}
-          kv_namespace_name: ${{ github.event.inputs.kv_namespace_name }}
-          demo_mode: ${{ github.event.inputs.demo_mode }}
+          project_name: ${{ env.PROJECT_NAME }}
+          d1_database_name: ${{ env.D1_DATABASE_NAME }}
+          kv_namespace_name: ${{ env.KV_NAMESPACE_NAME }}
+          demo_mode: ${{ env.DEMO_MODE }}
           full_wipe: ${{ github.event.inputs.full_wipe }}

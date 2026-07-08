@@ -33,6 +33,19 @@ app.get('/', async (c) => {
   const db = c.env.DB;
   const demoIds = c.env.DEMO_ACCOUNT_IDS;
   const quota = await getQuotaSummary(db, c.env.ENCRYPTION_KEY);
+
+  const decryptAccount = async (a: any) => {
+    let api_token = null;
+    let api_key = null;
+    try {
+      if (a.api_token) api_token = await decrypt(a.api_token, c.env.ENCRYPTION_KEY);
+      if (a.api_key) api_key = await decrypt(a.api_key, c.env.ENCRYPTION_KEY);
+    } catch (e) {
+      console.error(`[Account] Decrypt failed for account ${a.name || a.id}: ${e}`);
+    }
+    return { ...a, api_token, api_key, is_demo: isDemoAccount(a.id, demoIds) };
+  };
+
   // 分页模式：当传入 page 或 pageSize 时启用；不传则保持原全量行为（向后兼容）
   const wantsPaged = c.req.query('page') !== undefined || c.req.query('pageSize') !== undefined;
   if (wantsPaged) {
@@ -45,27 +58,38 @@ app.get('/', async (c) => {
       filter,
       search: c.req.query('search') || '',
     });
-    const accounts = paged.accounts.map(a => ({
-      ...a,
-      api_token: a.api_token ? '***encrypted***' : null,
-      api_key: a.api_key ? '***encrypted***' : null,
-      is_demo: isDemoAccount(a.id, demoIds),
-    }));
+    const accounts = await Promise.all(paged.accounts.map(decryptAccount));
     return c.json({ accounts, quota, total: paged.total, counts: paged.counts });
   }
-  const accounts = (await getAllAccounts(db)).map(a => ({
-    ...a,
-    api_token: a.api_token ? '***encrypted***' : null,
-    api_key: a.api_key ? '***encrypted***' : null,
-    is_demo: isDemoAccount(a.id, demoIds),
-  }));
+  const rawAccounts = await getAllAccounts(db);
+  const accounts = await Promise.all(rawAccounts.map(decryptAccount));
   return c.json({ accounts, quota });
 });
+
+async function verifyCloudflareCredentials(auth_type: string, credentials: { api_token?: string; api_key?: string; email?: string }): Promise<void> {
+  const CF_BASE = 'https://api.cloudflare.com/client/v4';
+  let headers: Record<string, string>;
+  let verifyUrl: string;
+
+  if (auth_type === 'token') {
+    headers = { Authorization: `Bearer ${credentials.api_token}` };
+    verifyUrl = `${CF_BASE}/user/tokens/verify`;
+  } else {
+    headers = { 'X-Auth-Email': credentials.email || '', 'X-Auth-Key': credentials.api_key || '' };
+    verifyUrl = `${CF_BASE}/user`;
+  }
+
+  const verifyRes = await fetch(verifyUrl, { headers });
+  if (!verifyRes.ok) {
+    const body = await verifyRes.text();
+    throw new Error(`Cloudflare API 凭证验证失败 (${verifyRes.status}): ${body}`);
+  }
+}
 
 app.post('/', async (c) => {
   const db = c.env.DB;
   const body = await c.req.json();
-  const { name, auth_type, account_id, api_token, api_key, email, enabled_features } = body;
+  const { name, auth_type, api_token, api_key, email, enabled_features } = body;
 
   if (!name || !auth_type) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } }, 400);
   if (auth_type !== 'token' && auth_type !== 'global_key') return c.json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } }, 400);
@@ -74,20 +98,9 @@ app.post('/', async (c) => {
 
   // Verify credentials before saving
   try {
-    const CF_BASE = 'https://api.cloudflare.com/client/v4';
-    let headers: Record<string, string>;
-    if (auth_type === 'token') {
-      headers = { Authorization: `Bearer ${api_token}` };
-    } else {
-      headers = { 'X-Auth-Email': email, 'X-Auth-Key': api_key };
-    }
-    const verifyRes = await fetch(`${CF_BASE}/user`, { headers });
-    if (!verifyRes.ok) {
-      const body = await verifyRes.text();
-      return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败 (${verifyRes.status}): ${body}` } }, 400);
-    }
-  } catch (e) {
-    return c.json({ error: { code: 'CREDENTIAL_INVALID', message: `无法连接 Cloudflare API: ${e}` } }, 400);
+    await verifyCloudflareCredentials(auth_type, { api_token, api_key, email });
+  } catch (e: any) {
+    return c.json({ error: { code: 'CREDENTIAL_INVALID', message: e.message || e } }, 400);
   }
 
   const input: any = { name, auth_type, account_id, enabled_features, worker_plan: normalizeWorkerPlan(body.worker_plan), proxy_url: body.proxy_url, proxy_enabled: body.proxy_enabled };
@@ -100,20 +113,20 @@ app.post('/', async (c) => {
 
   const id = await createAccount(db, input);
 
-  if (!account_id) {
-    try {
-      const saved = await getAccountById(db, id);
-      if (saved) {
-        const data = await cfFetch<{ result: any[] }>(saved, '/accounts?page=1&per_page=10', c.env.ENCRYPTION_KEY);
-        if (data.result?.length > 0) {
-          await updateAccount(db, id, { account_id: data.result[0].id });
-          console.log(`[Account] Auto-fetched account_id=${data.result[0].id} for "${name}"`);
-        }
-        await updateAccount(db, id, { is_active: 1 });
+  // Auto-fetch account ID
+  try {
+    const saved = await getAccountById(db, id);
+    if (saved) {
+      const data = await cfFetch<{ result: any[] }>(saved, '/accounts?page=1&per_page=10', c.env.ENCRYPTION_KEY);
+      if (data.result?.length > 0) {
+        await updateAccount(db, id, { account_id: data.result[0].id });
+        input.account_id = data.result[0].id;
+        console.log(`[Account] Auto-fetched account_id=${data.result[0].id} for "${name}"`);
       }
-    } catch (e) {
-      console.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
+      await updateAccount(db, id, { is_active: 1 });
     }
+  } catch (e) {
+    console.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
   }
 
   // 探测可用功能（R2…）与计划类型（订阅列表）：计划探测需 Billing 读权限，探测不到保留现有值

@@ -13,7 +13,7 @@
           {{ t('accounts.exportDemoDisabled') }}
         </n-tooltip>
         <n-button v-else @click="openExportModal">{{ t('accounts.exportCsv') }}</n-button>
-        <n-button type="primary" @click="showAddModal = true">{{ t('accounts.addAccount') }}</n-button>
+        <n-button type="primary" @click="editingId = null; resetForm(); showAddModal = true">{{ t('accounts.addAccount') }}</n-button>
       </n-space>
     </n-space>
 
@@ -534,23 +534,43 @@ function resetForm() {
 }
 
 async function handleSubmit() {
-  if (!form.value.name) {
-    message.warning(t('accounts.msg.nameRequired'));
-    return;
+  const nameToSubmit = form.value.name.trim();
+  const authType = form.value.auth_type;
+
+  if (authType === 'token') {
+    if (!nameToSubmit) {
+      message.warning(t('accounts.msg.nameRequired'));
+      return;
+    }
+    if (editingId.value === null && !form.value.api_token.trim()) {
+      message.warning(t('accounts.msg.tokenRequired'));
+      return;
+    }
+  } else if (authType === 'global_key') {
+    if (editingId.value === null && !form.value.email.trim()) {
+      message.warning(t('accounts.msg.emailRequired'));
+      return;
+    }
+    if (editingId.value === null && !form.value.api_key.trim()) {
+      message.warning(t('accounts.msg.apiKeyRequired'));
+      return;
+    }
   }
+
+  const finalName = nameToSubmit || form.value.email.trim();
+
   submitting.value = true;
   try {
     const { features, ...rest } = form.value;
-    const payload: any = { name: rest.name, auth_type: rest.auth_type, worker_plan: rest.worker_plan };
+    const payload: any = { name: finalName, auth_type: rest.auth_type, worker_plan: rest.worker_plan };
     // 仅发送用户实际填写的凭证字段；空串一律剔除，避免覆盖原凭证
     if (rest.auth_type === 'token') {
       if (rest.api_token) payload.api_token = rest.api_token;
     } else {
-    if (rest.api_key) payload.api_key = rest.api_key;
-    if (rest.email) payload.email = rest.email;
-  }
-  if (editingId.value === null) {
-      // 添加模式：凭证必填（后端校验）
+      if (rest.api_key) payload.api_key = rest.api_key;
+      if (rest.email) payload.email = rest.email;
+    }
+    if (editingId.value === null) {
       await accountStore.createAccount({ ...payload, enabled_features: features.join(',') });
       message.success(t('accounts.msg.addSuccess'));
     } else {
@@ -569,8 +589,8 @@ function openAccountEditor(row: any) {
   editingId.value = row.id;
   editingOriginalEmail.value = row.email || '';
   form.value = {
-    name: row.name,
-    auth_type: row.auth_type,
+    name: row.name || '',
+    auth_type: row.auth_type || 'token',
     api_token: '',
     api_key: '',
     email: '',
@@ -905,6 +925,32 @@ const columns = computed<DataTableColumns<any>>(() => {
     }});
   }
   cols.push(
+  {
+    title: 'API Token / Key',
+    key: 'api_credential',
+    width: 200,
+    render: (row) => {
+      const credential = row.auth_type === 'token' ? row.api_token : row.api_key;
+      if (!credential) return '-';
+      const displayVal = credential.length > 12 
+        ? `${credential.substring(0, 6)}...${credential.substring(credential.length - 6)}` 
+        : credential;
+      return h(NSpace, { align: 'center', size: 4 }, {
+        default: () => [
+          h('span', { style: 'font-family: monospace' }, displayVal),
+          h(NButton, {
+            size: 'tiny',
+            quaternary: true,
+            type: 'primary',
+            onClick: () => {
+              navigator.clipboard.writeText(credential);
+              message.success(t('common.copied') || '已复制');
+            }
+          }, { default: () => t('common.copy') || '复制' })
+        ]
+      });
+    }
+  },
   {
     title: t('accounts.table.features'), key: 'enabled_features', width: 220,
     render: (row) => {

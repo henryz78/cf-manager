@@ -1,10 +1,8 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import Cloudflare from 'cloudflare';
-import { getAllAccounts, createAccount, deleteAccount, getAccountById, getAccountByEmail, nameFromEmail, updateAccountStatus, updateAccountId, updateAccountFeatures, updateAccount, AccountInput } from '../models/account';
-import { listAccountsPaged, AccountListFilter, Account, normalizeWorkerPlan } from '../models/account';
-import { encrypt } from '../services/encryptionService';
-import { decrypt } from '../services/encryptionService';
+import { getAllAccounts, createAccount, deleteAccount, getAccountById, getAccountByEmail, nameFromEmail, updateAccountStatus, updateAccountId, updateAccountFeatures, updateAccount, AccountInput, listAccountsPaged, AccountListFilter, Account, normalizeWorkerPlan } from '../models/account';
+import { encrypt, decrypt } from '../services/encryptionService';
 import { getCfClient } from '../services/cfFactory';
 import { getQuotaSummary } from '../services/quotaTracker';
 import { clearCache } from '../services/accountRouter';
@@ -73,9 +71,35 @@ router.get('/', (req: Request, res: Response, next: NextFunction) => {
   } catch (err) { next(err); }
 });
 
+async function verifyCloudflareCredentials(auth_type: string, credentials: { api_token?: string; api_key?: string; email?: string }): Promise<void> {
+  const fetch = require('node-fetch');
+  const httpAgent = getHttpAgent();
+  const fetchOpts: any = {
+    headers: {}
+  };
+  if (httpAgent) fetchOpts.agent = httpAgent;
+
+  if (auth_type === 'token') {
+    fetchOpts.headers['Authorization'] = `Bearer ${credentials.api_token}`;
+    const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', fetchOpts);
+    if (!verifyRes.ok) {
+      const body = await verifyRes.text();
+      throw new Error(`Cloudflare API Token 验证失败 (${verifyRes.status}): ${body}`);
+    }
+  } else {
+    fetchOpts.headers['X-Auth-Email'] = credentials.email;
+    fetchOpts.headers['X-Auth-Key'] = credentials.api_key;
+    const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user', fetchOpts);
+    if (!verifyRes.ok) {
+      const body = await verifyRes.text();
+      throw new Error(`Cloudflare API Key 验证失败 (${verifyRes.status}): ${body}`);
+    }
+  }
+}
+
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, auth_type, account_id, api_token, api_key, email } = req.body;
+    const { name, auth_type, api_token, api_key, email } = req.body;
     if (!name || !auth_type) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } });
       return;
@@ -95,19 +119,9 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
 
     // Verify credentials before saving
     try {
-      const httpAgent = getHttpAgent();
-      const opts: Record<string, any> = {};
-      if (httpAgent) opts.httpAgent = httpAgent;
-
-      let tempCf: Cloudflare;
-      if (auth_type === 'token') {
-        tempCf = new Cloudflare({ apiToken: api_token, ...opts });
-      } else {
-        tempCf = new Cloudflare({ apiEmail: email, apiKey: api_key, ...opts });
-      }
-      await tempCf.user.get();
+      await verifyCloudflareCredentials(auth_type, { api_token, api_key, email });
     } catch (e: any) {
-      res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: `Cloudflare API 凭证验证失败: ${e.message || e}` } });
+      res.status(400).json({ error: { code: 'CREDENTIAL_INVALID', message: e.message || e } });
       return;
     }
 
@@ -120,24 +134,24 @@ router.post('/', async (req: Request, res: Response, next: NextFunction) => {
     }
     const id = createAccount(input);
 
-    if (!account_id) {
-      try {
-        const saved = getAccountById(id);
-        if (saved) {
-          const cf = getCfClient(saved);
-          const accts: any[] = [];
-          for await (const acct of cf.accounts.list()) {
-            accts.push(acct as any);
-          }
-          if (accts.length > 0) {
-            updateAccountId(id, accts[0].id);
-            appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}"`);
-          }
-          updateAccountStatus(id, true);
+    // Auto-fetch account ID
+    try {
+      const saved = getAccountById(id);
+      if (saved) {
+        const cf = getCfClient(saved);
+        const accts: any[] = [];
+        for await (const acct of cf.accounts.list()) {
+          accts.push(acct as any);
         }
-      } catch (e) {
-        appLogger.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
+        if (accts.length > 0) {
+          updateAccountId(id, accts[0].id);
+          input.account_id = accts[0].id;
+          appLogger.info(`[Account] Auto-fetched account_id=${accts[0].id} for "${name}"`);
+        }
+        updateAccountStatus(id, true);
       }
+    } catch (e) {
+      appLogger.warn(`[Account] Failed to auto-fetch account_id for "${name}": ${e}`);
     }
 
     // 探测可用功能（R2…）与计划类型（订阅列表）：计划探测需 Billing 读权限，探测不到保留现有值
@@ -263,7 +277,6 @@ router.put('/:id', async (req: Request, res: Response, next: NextFunction) => {
         appLogger.warn(`[Account] Failed to probe features for "${name}": ${e}`);
       }
     }
-
     res.json({ success: true });
   } catch (err) { next(err); }
 });
