@@ -183,6 +183,55 @@ app.patch('/:id/features', async (c) => {
   await addAuditLog(db, { account_id: id, action: 'update_features', target: account.name, detail: enabled_features, status: 'success' });
   return c.json({ success: true });
 });
+// ============ 查看账号凭证（解密后的 apiKey / apiToken / password） ============
+app.get('/:id/credentials', async (c) => {
+  const db = c.env.DB;
+  const encryptionKey = c.env.ENCRYPTION_KEY;
+  const id = parseInt(c.req.param('id'), 10);
+  
+  if (isDemoAccount(id, c.env.DEMO_ACCOUNT_IDS)) {
+    return c.json({ error: { code: 'DEMO_PROTECTED', message: '演示账户不可查看凭证' } }, 403);
+  }
+  
+  const account = await getAccountById(db, id);
+  if (!account) {
+    return c.json({ error: { code: 'NOT_FOUND', message: 'Account not found' } }, 404);
+  }
+  
+  let api_token: string | null = null;
+  let api_key: string | null = null;
+  let password: string | null = null;
+  
+  try {
+    if (account.api_token) api_token = await decrypt(account.api_token, encryptionKey);
+    if (account.api_key) api_key = await decrypt(account.api_key, encryptionKey);
+    if (account.password) password = await decrypt(account.password, encryptionKey);
+  } catch (e: any) {
+    console.error(`[Account] 解密凭证失败 id=${id}: ${e}`);
+    return c.json({ error: { code: 'DECRYPT_ERROR', message: '凭证解密失败' } }, 500);
+  }
+  
+  try {
+    await addAuditLog(db, {
+      account_id: id,
+      action: 'view_credentials',
+      target: account.name,
+      detail: account.auth_type,
+      status: 'success'
+    });
+  } catch {}
+  
+  return c.json({
+    id: account.id,
+    name: account.name,
+    auth_type: account.auth_type,
+    email: account.email,
+    api_token,
+    api_key,
+    password,
+    account_id: account.account_id,
+  });
+});
 
 app.delete('/:id', async (c) => {
   const db = c.env.DB;
