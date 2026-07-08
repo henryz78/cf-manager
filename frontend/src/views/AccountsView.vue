@@ -4,7 +4,7 @@
       <n-h2>账号管理</n-h2>
       <n-space>
         <n-button @click="showImportModal = true">导入 CSV</n-button>
-        <n-button type="primary" @click="showAddModal = true">添加账号</n-button>
+        <n-button type="primary" @click="isEditing = false; resetForm(); showAddModal = true">添加账号</n-button>
       </n-space>
     </n-space>
 
@@ -44,10 +44,10 @@
       :row-key="(row: any) => row.id"
     />
 
-    <n-modal v-model:show="showAddModal" preset="dialog" title="添加账号" style="width: 500px; max-width: 95vw">
+    <n-modal v-model:show="showAddModal" preset="dialog" :title="isEditing ? '编辑账号' : '添加账号'" style="width: 500px; max-width: 95vw">
       <n-form :model="form" label-placement="left" label-width="100">
-        <n-form-item label="名称">
-          <n-input v-model:value="form.name" placeholder="账号名称" />
+        <n-form-item :label="form.auth_type === 'global_key' ? '名称 (选填)' : '名称'">
+          <n-input v-model:value="form.name" :placeholder="form.auth_type === 'global_key' ? '未填则默认使用邮箱' : '账号名称'" />
         </n-form-item>
         <n-form-item label="认证类型">
           <n-select v-model:value="form.auth_type" :options="authTypeOptions" />
@@ -71,7 +71,7 @@
       </n-form>
       <template #action>
         <n-button @click="showAddModal = false">取消</n-button>
-        <n-button type="primary" :loading="submitting" @click="handleAdd">提交</n-button>
+        <n-button type="primary" :loading="submitting" @click="handleSubmit">提交</n-button>
       </template>
     </n-modal>
 
@@ -289,6 +289,9 @@ function handleSearchInput(val: string) {
   }, 400);
 }
 
+const isEditing = ref(false);
+const editingId = ref<number | null>(null);
+
 const featureOptions = [
   { label: 'Workers AI', value: 'ai' },
   { label: 'Workers / Pages', value: 'workers' },
@@ -323,21 +326,66 @@ function resetForm() {
   form.value = { name: '', auth_type: 'token', api_token: '', api_key: '', email: '', features: ['ai', 'workers', 'browser_render', 'dns', 'storage'] };
 }
 
-async function handleAdd() {
-  if (!form.value.name) {
-    message.warning('请输入账号名称');
-    return;
+async function handleSubmit() {
+  const nameToSubmit = form.value.name.trim();
+  const authType = form.value.auth_type;
+  
+  if (authType === 'token') {
+    if (!nameToSubmit) {
+      message.warning('请输入账号名称');
+      return;
+    }
+    if (!form.value.api_token.trim()) {
+      message.warning('请输入 API Token');
+      return;
+    }
+  } else if (authType === 'global_key') {
+    if (!form.value.email.trim()) {
+      message.warning('请输入邮箱');
+      return;
+    }
+    if (!form.value.api_key.trim()) {
+      message.warning('请输入 API Key');
+      return;
+    }
   }
+
+  const finalName = nameToSubmit || form.value.email.trim();
+
   submitting.value = true;
   try {
     const { features, ...rest } = form.value;
-    await accountStore.createAccount({ ...rest, enabled_features: features.join(',') });
-    message.success('账号添加成功');
+    const payload = {
+      ...rest,
+      name: finalName,
+      enabled_features: features.join(','),
+    };
+    if (isEditing.value && editingId.value !== null) {
+      await accountStore.updateAccount(editingId.value, payload);
+      message.success('账号修改成功');
+    } else {
+      await accountStore.createAccount(payload);
+      message.success('账号添加成功');
+    }
     showAddModal.value = false;
     resetForm();
   } finally {
     submitting.value = false;
   }
+}
+
+function openEditModal(row: any) {
+  isEditing.value = true;
+  editingId.value = row.id;
+  form.value = {
+    name: row.name || '',
+    auth_type: row.auth_type || 'token',
+    api_token: row.api_token || '',
+    api_key: row.api_key || '',
+    email: row.email || '',
+    features: parseFeatures(row.enabled_features),
+  };
+  showAddModal.value = true;
 }
 
 function openFeatureEditor(row: any) {
@@ -460,9 +508,35 @@ function parseFeatures(raw: string | undefined): string[] {
 
 const columns: DataTableColumns<any> = [
   { title: 'ID', key: 'id', width: 60 },
-  { title: '名称', key: 'name', width: 150 },
+  { title: '名称', key: 'name', width: 220, ellipsis: { tooltip: true } },
   { title: 'Account ID', key: 'account_id', width: 180, ellipsis: { tooltip: true }, render: (row) => row.account_id || '-' },
   { title: '认证类型', key: 'auth_type', width: 120, render: (row) => h(NTag, { size: 'small', type: row.auth_type === 'token' ? 'info' : 'warning' }, { default: () => row.auth_type === 'token' ? 'Token' : 'Key' }) },
+  {
+    title: 'API Token / Key',
+    key: 'api_credential',
+    width: 200,
+    render: (row) => {
+      const credential = row.auth_type === 'token' ? row.api_token : row.api_key;
+      if (!credential) return '-';
+      const displayVal = credential.length > 12 
+        ? `${credential.substring(0, 6)}...${credential.substring(credential.length - 6)}` 
+        : credential;
+      return h(NSpace, { align: 'center', size: 4 }, {
+        default: () => [
+          h('span', { style: 'font-family: monospace' }, displayVal),
+          h(NButton, {
+            size: 'tiny',
+            quaternary: true,
+            type: 'primary',
+            onClick: () => {
+              navigator.clipboard.writeText(credential);
+              message.success('已复制到剪贴板');
+            }
+          }, { default: () => '复制' })
+        ]
+      });
+    }
+  },
   {
     title: '功能', key: 'enabled_features', width: 200,
     render: (row) => {
@@ -517,6 +591,7 @@ const columns: DataTableColumns<any> = [
           row.is_demo
             ? null
             : h(NButton, { size: 'small', type: 'info', ghost: true, onClick: () => handleViewCredentials(row) }, { default: () => '查看Key' }),
+          h(NButton, { size: 'small', disabled: row.is_demo, onClick: () => openEditModal(row) }, { default: () => '编辑' }),
           h(NButton, { size: 'small', disabled: row.is_demo, onClick: () => openFeatureEditor(row) }, { default: () => '功能' }),
           h(NButton, { size: 'small', onClick: () => handleTest(row) }, { default: () => '测试' }),
           isExhausted

@@ -55,16 +55,26 @@ jobs:
     steps:
       - name: Mask secrets and export to env
         # 作为第一步注册脱敏，保证 checkout / setup-node 等步骤的 env 头也已被掩码。
-        # 直接引用 github.event.inputs.*，不进 job 级 env；写 $GITHUB_ENV 时重定向到文件，不进 stdout。
+        # 优先使用 GitHub Secrets 和 Variables，最后 fallback 到手动输入。
+        # 直接引用相关上下文，不进 job 级 env；写 $GITHUB_ENV 时重定向到文件，不进 stdout。
         run: |
-          echo "::add-mask::${{ github.event.inputs.cf_api_key }}"
-          echo "::add-mask::${{ github.event.inputs.cf_email }}"
-          echo "::add-mask::${{ github.event.inputs.encryption_key }}"
-          echo "::add-mask::${{ github.event.inputs.api_secret }}"
-          echo "CLOUDFLARE_API_KEY=${{ github.event.inputs.cf_api_key }}" >> $GITHUB_ENV
-          echo "CLOUDFLARE_EMAIL=${{ github.event.inputs.cf_email }}" >> $GITHUB_ENV
-          echo "ENCRYPTION_KEY=${{ github.event.inputs.encryption_key }}" >> $GITHUB_ENV
-          echo "API_SECRET=${{ github.event.inputs.api_secret }}" >> $GITHUB_ENV
+          CF_KEY="${{ secrets.CLOUDFLARE_API_KEY || vars.CLOUDFLARE_API_KEY || secrets.CF_API_KEY || vars.CF_API_KEY || github.event.inputs.cf_api_key }}"
+          CF_MAIL="${{ secrets.CLOUDFLARE_EMAIL || vars.CLOUDFLARE_EMAIL || secrets.CF_EMAIL || vars.CF_EMAIL || github.event.inputs.cf_email }}"
+          ENC_KEY="${{ secrets.ENCRYPTION_KEY || vars.ENCRYPTION_KEY || github.event.inputs.encryption_key }}"
+          API_SEC="${{ secrets.API_SECRET || vars.API_SECRET || github.event.inputs.api_secret }}"
+          
+          echo "::add-mask::$CF_KEY"
+          echo "::add-mask::$CF_MAIL"
+          echo "::add-mask::$ENC_KEY"
+          echo "::add-mask::$API_SEC"
+          
+          echo "CLOUDFLARE_API_KEY=$CF_KEY" >> $GITHUB_ENV
+          echo "CLOUDFLARE_EMAIL=$CF_MAIL" >> $GITHUB_ENV
+          echo "ENCRYPTION_KEY=$ENC_KEY" >> $GITHUB_ENV
+          echo "API_SECRET=$API_SEC" >> $GITHUB_ENV
+          echo "PROJECT_NAME=${{ secrets.PROJECT_NAME || vars.PROJECT_NAME || github.event.inputs.project_name || 'cfmgr' }}" >> $GITHUB_ENV
+          echo "D1_DATABASE_NAME=${{ secrets.D1_DATABASE_NAME || vars.D1_DATABASE_NAME || github.event.inputs.d1_database_name || 'cfmgr' }}" >> $GITHUB_ENV
+          echo "KV_NAMESPACE_NAME=${{ secrets.KV_NAMESPACE_NAME || vars.KV_NAMESPACE_NAME || github.event.inputs.kv_namespace_name || 'cfmgr' }}" >> $GITHUB_ENV
       - uses: actions/checkout@v5
 
       - uses: actions/setup-node@v5
@@ -89,7 +99,7 @@ jobs:
       - name: Setup D1 database
         id: d1
         run: |
-          DB_NAME="${{ github.event.inputs.d1_database_name }}"
+          DB_NAME="${{ env.D1_DATABASE_NAME }}"
 
           # Account ID：优先复用前面解析的，否则回退 whoami
           ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
@@ -171,14 +181,14 @@ jobs:
 
       - name: Run D1 migrations
         run: |
-          DB_NAME="${{ github.event.inputs.d1_database_name }}"
+          DB_NAME="${{ env.D1_DATABASE_NAME }}"
           # 为旧表添加新列（已存在则静默失败）
           wrangler d1 execute "$DB_NAME" --command="ALTER TABLE quota_usage ADD COLUMN optimistic INTEGER DEFAULT 0" --remote 2>/dev/null || true
 
       - name: Seed deployment account (full wipe only)
         if: ${{ github.event.inputs.full_wipe == 'true' }}
         run: |
-          DB_NAME="${{ github.event.inputs.d1_database_name }}"
+          DB_NAME="${{ env.D1_DATABASE_NAME }}"
           API_KEY="$CLOUDFLARE_API_KEY"
           API_EMAIL="$CLOUDFLARE_EMAIL"
           ENC_KEY="$ENCRYPTION_KEY"
@@ -211,7 +221,7 @@ jobs:
       - name: Setup KV namespace
         id: kv
         run: |
-          KV_NAME="${{ github.event.inputs.kv_namespace_name }}"
+          KV_NAME="${{ env.KV_NAMESPACE_NAME }}"
 
           # Account ID：优先复用前面解析的，否则回退 whoami（legacy 认证）
           ACCOUNT_ID="$CLOUDFLARE_ACCOUNT_ID"
@@ -279,7 +289,7 @@ jobs:
           sed -i '/^\[vars\]/,/^$/d' wrangler.toml
           sed -i "s/database_id = \".*\"/database_id = \"${{ steps.d1.outputs.database_id }}\"/" wrangler.toml
           sed -i "s/id = \"YOUR_KV_NAMESPACE_ID\"/id = \"${{ steps.kv.outputs.kv_namespace_id }}\"/" wrangler.toml
-          sed -i "s/^name = \".*\"/name = \"${{ github.event.inputs.project_name }}\"/" wrangler.toml
+          sed -i "s/^name = \".*\"/name = \"${{ env.PROJECT_NAME }}\"/" wrangler.toml
 
       - name: Install worker dependencies
         working-directory: worker
@@ -291,7 +301,7 @@ jobs:
 
       - name: Create Pages project if not exists
         run: |
-          PROJECT="${{ github.event.inputs.project_name }}"
+          PROJECT="${{ env.PROJECT_NAME }}"
           if wrangler pages project list 2>/dev/null | grep -qF "$PROJECT"; then
             echo "Project '$PROJECT' already exists, skipping creation"
           else
@@ -301,8 +311,8 @@ jobs:
       - name: Configure secrets
         id: secrets
         run: |
-          PROJECT="${{ github.event.inputs.project_name }}"
-          DB_NAME="${{ github.event.inputs.d1_database_name }}"
+          PROJECT="${{ env.PROJECT_NAME }}"
+          DB_NAME="${{ env.D1_DATABASE_NAME }}"
 
           # 使用 here-string 传入，并用 $VAR 引用 job 环境变量，避免明文出现在回显的脚本里
           wrangler pages secret put ENCRYPTION_KEY --project-name "$PROJECT" <<< "$ENCRYPTION_KEY"
@@ -341,14 +351,14 @@ jobs:
         working-directory: worker
         run: |
           # 不显式传目录：wrangler.toml 已配置 pages_build_output_dir = "public"
-          wrangler pages deploy --project-name "${{ github.event.inputs.project_name }}" --branch main --commit-dirty
+          wrangler pages deploy --project-name "${{ env.PROJECT_NAME }}" --branch main --commit-dirty
 
           # 获取 Account ID（优先复用前面解析的，否则回退 whoami）
           ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-$(wrangler whoami 2>/dev/null | grep -oE '[0-9a-f]{32}' | head -1 || echo "")}"
 
           # 通过 CF API 查询项目的实际 subdomain
           if [ -n "$ACCOUNT_ID" ]; then
-            PROJECT_DETAILS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/${{ github.event.inputs.project_name }}" \
+            PROJECT_DETAILS=$(curl -s -X GET "https://api.cloudflare.com/client/v4/accounts/$ACCOUNT_ID/pages/projects/${{ env.PROJECT_NAME }}" \
               -H "X-Auth-Email: $CLOUDFLARE_EMAIL" \
               -H "X-Auth-Key: $CLOUDFLARE_API_KEY")
             echo "Project API response: $PROJECT_DETAILS"
@@ -366,7 +376,7 @@ jobs:
           # 兜底：拿不到则使用「项目名」
           if [ -z "$PROJECT_SUBDOMAIN" ]; then
             echo "WARNING: 无法获取项目 subdomain，fallback 使用项目名"
-            PROJECT_SUBDOMAIN="${{ github.event.inputs.project_name }}"
+            PROJECT_SUBDOMAIN="${{ env.PROJECT_NAME }}"
           fi
           PROJECT_SUBDOMAIN="${PROJECT_SUBDOMAIN}.pages.dev"
 
@@ -381,9 +391,9 @@ jobs:
           echo "|--------|-----|" >> $GITHUB_STEP_SUMMARY
           echo "| CF 邮箱 | (出于安全不显示) |" >> $GITHUB_STEP_SUMMARY
           echo "| CF API Key | **** (已隐藏) |" >> $GITHUB_STEP_SUMMARY
-          echo "| Pages 项目 | ${{ github.event.inputs.project_name }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| D1 数据库 | ${{ github.event.inputs.d1_database_name }} (${{ steps.d1.outputs.database_id }}) |" >> $GITHUB_STEP_SUMMARY
-          echo "| KV 命名空间 | ${{ github.event.inputs.kv_namespace_name }} (${{ steps.kv.outputs.kv_namespace_id }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| Pages 项目 | ${{ env.PROJECT_NAME }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| D1 数据库 | ${{ env.D1_DATABASE_NAME }} (${{ steps.d1.outputs.database_id }}) |" >> $GITHUB_STEP_SUMMARY
+          echo "| KV 命名空间 | ${{ env.KV_NAMESPACE_NAME }} (${{ steps.kv.outputs.kv_namespace_id }}) |" >> $GITHUB_STEP_SUMMARY
           echo "| 完全覆盖 | ${{ github.event.inputs.full_wipe }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 演示保护账户 IDs | ${{ steps.secrets.outputs.demo_ids }} |" >> $GITHUB_STEP_SUMMARY
           echo "| 访问地址 | ${{ steps.deploy.outputs.deploy_url }} |" >> $GITHUB_STEP_SUMMARY

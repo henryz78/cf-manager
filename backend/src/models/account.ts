@@ -157,3 +157,23 @@ export function nameFromEmail(email: string): string {
   // 有点：取最后一段（去掉中间名缩写等）
   return parts[parts.length - 1];
 }
+
+export function updateAccount(id: number, input: Partial<AccountInput>): void {
+  const fields: string[] = [];
+  const values: any[] = [];
+  
+  for (const [key, val] of Object.entries(input)) {
+    if (key === 'enabled_features') {
+      fields.push('enabled_features = ?');
+      values.push(val);
+    } else if (['name', 'auth_type', 'api_token', 'api_key', 'email', 'account_id'].includes(key)) {
+      fields.push(`${key} = ?`);
+      values.push(val === undefined ? null : val);
+    }
+  }
+  
+  if (fields.length === 0) return;
+  
+  values.push(id);
+  getDb().prepare(`UPDATE accounts SET ${fields.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = ?`).run(...values);
+}

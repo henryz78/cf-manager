@@ -30,4 +30,5 @@ export const accountsApi = {
       timeout: 600000, // 10 分钟，并发批处理下足够覆盖数百账户
     });
   },
+  update: (id: number, data: any) => apiClient.put(`/accounts/${id}`, data),
 };

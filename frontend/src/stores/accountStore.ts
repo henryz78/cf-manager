@@ -110,11 +110,15 @@ export const useAccountStore = defineStore('accounts', () => {
     return data as { summary: { total: number; success: number; skipped: number; error: number }; results: Array<{ email: string; name: string; status: 'success' | 'skipped' | 'error'; message?: string }> };
   }
 
+  async function updateAccount(id: number, input: any) {
+    await accountsApi.update(id, input);
+    await fetchAccounts();
+  }
+
   return {
     accounts, quota, loading,
     page, pageSize, filter, search, total, counts,
     fetchAccounts, setPage, setPageSize, setFilter, setSearch,
-    createAccount, deleteAccount, testAccount, testBatch, updateFeatures, clearExhausted, importCsv,
-    getCredentials,
+    createAccount, deleteAccount, testAccount, testBatch, updateFeatures, clearExhausted, importCsv, updateAccount, getCredentials,
   };
 });
