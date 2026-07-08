@@ -320,31 +320,38 @@ jobs:
             wrangler pages secret put API_SECRET --project-name "$PROJECT" <<< "$API_SECRET"
           fi
 
-          # 从 D1 自动获取所有账户 ID 作为演示模式保护列表
-          echo "查询 D1 中的账户列表..."
-          # 注意：不能用 2>&1，否则 wrangler 的警告会污染 JSON；stderr 丢弃即可
-          ACCOUNT_JSON=$(wrangler d1 execute "$DB_NAME" --remote --command="SELECT GROUP_CONCAT(id) AS ids FROM accounts" --json 2>/dev/null || true)
-          echo "D1 查询原始输出: $ACCOUNT_JSON"
-          # 用 node 解析 JSON，兼容空表（ids 为 null）和 wrangler v4 的数组结构
-          DEMO_IDS=$(node -e '
-            const input = process.argv[1] || "";
-            try {
-              const data = JSON.parse(input);
-              // wrangler d1 execute --json 输出为数组，取第一个对象的 ids 字段
-              const row = Array.isArray(data) ? data[0] : data;
-              const ids = row?.results?.[0]?.ids ?? row?.ids ?? null;
-              if (ids !== null && ids !== undefined && String(ids).trim()) console.log(String(ids));
-            } catch (e) {
-              console.error("JSON 解析失败: " + e.message);
-            }
-          ' "$ACCOUNT_JSON" || echo "")
-          if [ -n "$DEMO_IDS" ]; then
-            echo "保护账户 IDs: $DEMO_IDS"
-            echo "$DEMO_IDS" | wrangler pages secret put DEMO_ACCOUNT_IDS --project-name "$PROJECT"
+          # 仅在启用演示模式时，从 D1 自动获取所有账户 ID 作为演示模式保护列表
+          if [ "${{ secrets.DEMO_MODE || vars.DEMO_MODE }}" = "true" ]; then
+            echo "演示模式已启用，查询 D1 中的账户列表..."
+            # 注意：不能用 2>&1，否则 wrangler 的警告会污染 JSON；stderr 丢弃即可
+            ACCOUNT_JSON=$(wrangler d1 execute "$DB_NAME" --remote --command="SELECT GROUP_CONCAT(id) AS ids FROM accounts" --json 2>/dev/null || true)
+            echo "D1 查询原始输出: $ACCOUNT_JSON"
+            # 用 node 解析 JSON，兼容空表（ids 为 null）和 wrangler v4 的数组结构
+            DEMO_IDS=$(node -e '
+              const input = process.argv[1] || "";
+              try {
+                const data = JSON.parse(input);
+                // wrangler d1 execute --json 输出为数组，取第一个对象的 ids 字段
+                const row = Array.isArray(data) ? data[0] : data;
+                const ids = row?.results?.[0]?.ids ?? row?.ids ?? null;
+                if (ids !== null && ids !== undefined && String(ids).trim()) console.log(String(ids));
+              } catch (e) {
+                console.error("JSON 解析失败: " + e.message);
+              }
+            ' "$ACCOUNT_JSON" || echo "")
+            if [ -n "$DEMO_IDS" ]; then
+              echo "保护账户 IDs: $DEMO_IDS"
+              echo "$DEMO_IDS" | wrangler pages secret put DEMO_ACCOUNT_IDS --project-name "$PROJECT"
+            else
+              echo "暂无账户，跳过 DEMO_ACCOUNT_IDS 设置"
+            fi
+            echo "demo_ids=$DEMO_IDS" >> $GITHUB_OUTPUT
           else
-            echo "暂无账户，跳过 DEMO_ACCOUNT_IDS 设置"
+            echo "演示模式未启用，自动清理云端已有的 DEMO_ACCOUNT_IDS 保护设置..."
+            # 自动删除可能存在的 DEMO_ACCOUNT_IDS 秘钥，防止自建用户历史遗留锁定，使用 || true 防止秘钥不存在时报错导致部署失败
+            wrangler pages secret delete DEMO_ACCOUNT_IDS --project-name "$PROJECT" || true
+            echo "demo_ids=" >> $GITHUB_OUTPUT
           fi
-          echo "demo_ids=$DEMO_IDS" >> $GITHUB_OUTPUT
 
       - name: Deploy to Cloudflare Pages
         id: deploy
