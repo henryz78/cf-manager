@@ -115,8 +115,8 @@ if (OBFUSCATE_FRONTEND) {
   console.log(`  Obfuscated ${frontendCount} frontend files`);
 }
 
-console.log(`[${++step}/${totalSteps}] Syncing shared pricing data...`);
-execSync('node ../scripts/sync-pricing.js', { cwd: __dirname, stdio: 'inherit' });
+console.log(`[${++step}/${totalSteps}] Syncing shared files (pricing, catalog schema/validator)...`);
+execSync('node ../scripts/sync-shared.js', { cwd: __dirname, stdio: 'inherit' });
 
 console.log(`[${++step}/${totalSteps}] Bundling worker backend...`);
 execSync('npx esbuild src/index.ts --bundle --outfile=public/_worker.js --format=esm --target=es2022 --minify', {

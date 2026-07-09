@@ -1,5 +1,5 @@
 // NOTE: model-pricing.json 是自动生成的，唯一真实来源在 shared/model-pricing.json
-// 修改定价请编辑 shared/model-pricing.json，然后运行 npm run build 或 node scripts/sync-pricing.js
+// 修改定价请编辑 shared/model-pricing.json，然后运行 npm run build 或 node scripts/sync-shared.js
 import pricingData from '../data/model-pricing.json';
 
 export function estimateNeurons(

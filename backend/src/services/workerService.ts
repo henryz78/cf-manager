@@ -2,8 +2,45 @@ import { Account } from '../models/account';
 import { getCfClient, getAuthHeaders } from './cfFactory';
 import { proxyFetch, buildCurlCommand } from './proxyService';
 import { getAllZones } from './accountRouter';
-import crypto from 'crypto';
+import path from 'path';
+import { File } from 'node:buffer';
+import { blake3 } from 'hash-wasm';
 import { appLogger } from './logger';
+
+// Simple MIME type lookup for common web asset types
+function getContentType(filename: string): string {
+  const ext = filename.split('.').pop()?.toLowerCase() || '';
+  const types: Record<string, string> = {
+    html: 'text/html', htm: 'text/html', css: 'text/css', js: 'application/javascript',
+    mjs: 'application/javascript', json: 'application/json', xml: 'application/xml',
+    txt: 'text/plain', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg',
+    jpeg: 'image/jpeg', gif: 'image/gif', ico: 'image/x-icon', webp: 'image/webp',
+    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+    eot: 'application/vnd.ms-fontobject', mp4: 'video/mp4', webm: 'video/webm',
+    mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', pdf: 'application/pdf',
+    wasm: 'application/wasm', map: 'application/json',
+  };
+  return types[ext] || 'application/octet-stream';
+}
+
+// 与 wrangler 同款资产哈希（@cloudflare/deploy-helpers 的 hashFile，全链路唯一使用的算法）：
+//   hash = blake3(base64(content) + extension).hex().slice(0, 32)
+// Cloudflare 资产存储按此算法做内容寻址，manifest 的 hash 必须与之匹配，否则运行时按 hash 取内容失败 → 404。
+async function computePageAssetHash(buffer: Buffer, filePath: string): Promise<string> {
+  const base64Contents = buffer.toString('base64');
+  const extension = path.extname(filePath).substring(1);
+  const fullHash = await blake3(Buffer.from(base64Contents + extension, 'utf8'));
+  return fullHash.slice(0, 32);
+}
+
+// Node `Buffer` is not directly assignable to the DOM `BlobPart` type under strict mode
+// (its backing store is typed as `ArrayBufferLike`, which may be a `SharedArrayBuffer`).
+// Copy into an ArrayBuffer-backed Uint8Array so it serializes cleanly as a binary multipart field.
+function bufferToBlobPart(buf: Buffer) {
+  const view = new Uint8Array(buf.byteLength);
+  view.set(buf);
+  return view;
+}
 
 export interface WorkerScript {
   id: string;
@@ -12,6 +49,20 @@ export interface WorkerScript {
   modified_on: string;
   etag: string;
   handlers: string[];
+}
+
+export interface DeployWorkerOptions {
+  bindings?: Record<string, unknown>[];
+  env?: Record<string, string>;
+  compatibilityDate?: string;
+  enableSubdomain?: boolean;
+  createDeployment?: boolean;
+  deploymentAnnotation?: Record<string, string>;
+}
+
+export interface DeployWorkerResult {
+  script: any;
+  subdomain?: string;
 }
 
 export interface PagesProject {
@@ -47,19 +98,105 @@ export async function listPages(account: Account): Promise<PagesProject[]> {
   return projects;
 }
 
-export async function deployWorker(account: Account, name: string, scriptContent: string): Promise<WorkerScript> {
+const CF_BASE = 'https://api.cloudflare.com/client/v4';
+
+async function getAccountSubdomain(account: Account): Promise<string> {
+  const headers = getAuthHeaders(account);
+  try {
+    const resp = await fetch(`${CF_BASE}/accounts/${account.account_id}/workers/subdomain`, {
+      headers: { 'Content-Type': 'application/json', ...headers },
+    });
+    if (!resp.ok) return '';
+    const json = await resp.json() as any;
+    return json?.result?.subdomain || '';
+  } catch {
+    return '';
+  }
+}
+
+export async function deployWorker(
+  account: Account,
+  name: string,
+  scriptContent: string | Buffer,
+  options?: DeployWorkerOptions,
+): Promise<DeployWorkerResult> {
   const accountId = account.account_id;
+  if (!accountId) throw new Error('Account ID is required');
   const cf = getCfClient(account);
-  const result = await cf.workers.scripts.update(name, {
-    account_id: accountId!,
-    metadata: { main_module: 'worker.js', compatibility_date: '2024-01-01' } as any,
-    'worker.js': new Blob([scriptContent], { type: 'application/javascript+module' })
-  } as any);
-  return result as any;
+  const authHeaders = getAuthHeaders(account);
+
+  // Build metadata with optional bindings and env vars
+  const metadata: any = {
+    main_module: 'worker.js',
+    compatibility_date: options?.compatibilityDate || '2024-01-01',
+  };
+
+  if (options?.bindings?.length) {
+    metadata.bindings = options.bindings;
+  }
+
+  if (options?.env) {
+    metadata.bindings = [
+      ...(metadata.bindings || []),
+      ...Object.entries(options.env).map(([k, v]) => ({ type: 'plain_text', name: k, text: v })),
+    ];
+  }
+
+  // Convert content to Uint8Array for Blob (handles both string and Buffer)
+  const contentBytes = typeof scriptContent === 'string'
+    ? new TextEncoder().encode(scriptContent)
+    : new Uint8Array(scriptContent);
+
+  // Use raw fetch + FormData (same as Cloudflare wrangler does)
+  // The SDK's scripts.update can mangle the multipart form in some versions
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('worker.js', new Blob([contentBytes], { type: 'application/javascript+module' }), 'worker.js');
+
+  const resp = await fetch(`${CF_BASE}/accounts/${accountId}/workers/scripts/${name}`, {
+    method: 'PUT',
+    headers: authHeaders,
+    body: form,
+  });
+  const respJson = await resp.json() as any;
+  if (!resp.ok || !respJson.success) {
+    throw new Error(`${resp.status} ${JSON.stringify(respJson)}`);
+  }
+
+  // Enable workers.dev subdomain so the Worker is accessible immediately
+  let subdomain: string | undefined;
+  const shouldEnableSubdomain = options?.enableSubdomain !== false; // default true
+  if (shouldEnableSubdomain) {
+    try {
+      await cf.workers.scripts.subdomain.create(name, { account_id: accountId, enabled: true, previews_enabled: true } as any);
+    } catch (_) {
+      // Soft fail: user can still enable manually from settings drawer
+    }
+
+    // Get account-level subdomain for URL construction
+    subdomain = await getAccountSubdomain(account);
+  }
+
+  // Create deployment (for version tracking)
+  if (options?.createDeployment) {
+    try {
+      await fetch(`${CF_BASE}/accounts/${accountId}/workers/scripts/${name}/deployments`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ annotations: options.deploymentAnnotation || {} }),
+      });
+    } catch (e: any) {
+      appLogger.warn(`[Worker Deploy] Deployment creation warning for ${name}: ${e.message}`);
+    }
+  }
+
+  return { script: respJson.result, subdomain };
 }
 
 // Deploy worker from URL: fetch JS from remote URL then upload
-export async function deployWorkerFromUrl(account: Account, name: string, url: string): Promise<WorkerScript> {
+export async function deployWorkerFromUrl(
+  account: Account, name: string, url: string, options?: DeployWorkerOptions,
+): Promise<DeployWorkerResult> {
   const resp = await proxyFetch(url);
   if (!resp.ok) {
     const err = new Error(`Failed to fetch JS from URL: ${resp.status} ${resp.statusText}`);
@@ -67,7 +204,7 @@ export async function deployWorkerFromUrl(account: Account, name: string, url: s
     throw err;
   }
   const scriptContent = await resp.text();
-  return deployWorker(account, name, scriptContent);
+  return deployWorker(account, name, scriptContent, options);
 }
 
 export async function deleteWorker(account: Account, name: string): Promise<void> {
@@ -482,7 +619,14 @@ export async function getWorkersUsageToday(account: Account): Promise<WorkersUsa
   };
 }
 
-// Pages deployment: create project if needed, then upload files via SDK
+// Pages deployment via the documented Direct Upload contract, entirely through the official SDK.
+//
+// `client.pages.projects.deployments.create` sends a `multipart/form-data` request. The SDK's
+// `createForm` serializes every body field: strings become text fields, and any `Uploadable`
+// (File/Blob/Buffer/ReadStream) becomes a binary file field — exactly matching the curl form
+// `-F "index.html=@dist/index.html"`. So we inline ALL files (regular assets + special files) as
+// `File` fields in the same call that carries the `manifest`, and the SDK handles the multipart
+// serialization for us. No non-public endpoints involved.
 export async function deployPages(
   account: Account,
   projectName: string,
@@ -503,55 +647,83 @@ export async function deployPages(
     }
   }
 
-  // 2. If no files, just create the project (empty project)
+  // 2. If no files, just create/return the (empty) project
   if (!files || files.length === 0) {
     appLogger.info(`[Pages Deploy] Created empty project: ${projectName}`);
-    const projectInfo = await cf.pages.projects.get(projectName, { account_id: accountId! });
-    return projectInfo;
+    return await cf.pages.projects.get(projectName, { account_id: accountId! });
   }
 
-  // 3. Build manifest + deployment params, separating special files
-  // SDK uses camelCase param names, NOT the raw filenames
-  const SPECIAL_FILE_TO_PARAM: Record<string, string> = {
-    '_worker.js': '_workerJS',
-    '_worker.bundle': '_workerBundle',
-    '_headers': '_headers',
-    '_redirects': '_redirects',
-    '_routes.json': '_routesJson',
-    'functions-filepath-routing-config.json': 'functionsFilepathRoutingConfigJson',
-  };
+  // 3. Normalize paths and separate special files from regular assets.
+  //    Special files are uploaded under their fixed field name (e.g. `_worker.js`); they are NOT
+  //    placed in the manifest. Regular assets are uploaded under their absolute path (leading
+  //    slash, e.g. `/index.html`) and listed in the manifest (path -> content hash), matching
+  //    wrangler's convention where the manifest key is `/${relativePath}`.
+  const SPECIAL_FILES = new Set([
+    '_worker.js', '_worker.bundle', '_headers', '_redirects', '_routes.json',
+    'functions-filepath-routing-config.json',
+  ]);
 
-  for (const f of files) {
-    f.path = f.path.replace(/\\/g, '/').replace(/^\/+/, '');
-  }
+  const normalizedFiles = files.map(f => ({
+    ...f,
+    path: f.path.replace(/\\/g, '/').replace(/^\/+/, ''),
+  }));
 
-  const manifest: Record<string, string> = {};
-  const params: Record<string, any> = {
-    account_id: accountId,
-    manifest: '',
-    branch: 'main',
-    commit_hash: 'direct-upload',
-    commit_message: 'Deploy via CF Manager',
-    commit_dirty: 'false' as const,
-  };
+  const specialFiles: Array<{ path: string; buffer: Buffer }> = [];
+  const assetFiles: Array<{ path: string; buffer: Buffer }> = [];
 
-  for (const f of files) {
+  for (const f of normalizedFiles) {
     const basename = f.path.split('/').pop() || f.path;
-    const paramName = (!f.path.includes('/')) ? SPECIAL_FILE_TO_PARAM[basename] : undefined;
-    appLogger.info(`[Pages Deploy] File: "${f.path}" | basename: "${basename}" | paramName: ${paramName || '(none, normal file)'} | size: ${f.buffer.length} bytes`);
-    if (paramName) {
-      params[paramName] = new File([new Uint8Array(f.buffer)], basename, { type: 'application/octet-stream' });
+    if (!f.path.includes('/') && SPECIAL_FILES.has(basename)) {
+      specialFiles.push(f);
     } else {
-      manifest[f.path] = crypto.createHash('sha256').update(f.buffer).digest('hex');
-      params[f.path] = new File([new Uint8Array(f.buffer)], f.path, { type: 'application/octet-stream' });
+      // 普通资源路径加前导斜杠，与 wrangler 的 manifest key 约定一致（"/index.html"）。
+      // 注意：manifest key 与 multipart 字段名都用同一个 f.path，必须保持同步。
+      f.path = '/' + f.path;
+      assetFiles.push(f);
     }
   }
-  params.manifest = JSON.stringify(manifest);
 
-  appLogger.info(`[Pages Deploy] Total: ${files.length} files | Normal: ${Object.keys(manifest).length} | Special: ${files.length - Object.keys(manifest).length}`);
-  appLogger.info(`[Pages Deploy] Manifest keys: ${JSON.stringify(Object.keys(manifest))}`);
-  appLogger.info(`[Pages Deploy] Special param keys: ${Object.keys(SPECIAL_FILE_TO_PARAM).filter(fn => params[SPECIAL_FILE_TO_PARAM[fn]]).map(fn => `${fn} -> ${SPECIAL_FILE_TO_PARAM[fn]}`).join(', ')}`);
+  appLogger.info(`[Pages Deploy] Total: ${files.length} files | Assets: ${assetFiles.length} | Special: ${specialFiles.length}`);
 
-  // 4. Deploy via SDK (handles multipart form construction)
-  return cf.pages.projects.deployments.create(projectName, params as any);
+  // 4. Build the manifest (relative path -> BLAKE3 content-addressing hash) for regular assets.
+  //    This hash is the key into Pages' asset store, so it must match wrangler's BLAKE3 scheme.
+  const manifest: Record<string, string> = {};
+  for (const f of assetFiles) {
+    manifest[f.path] = await computePageAssetHash(f.buffer, f.path);
+  }
+  appLogger.info(`[Pages Deploy] Manifest: ${JSON.stringify(manifest)}`);
+
+  // 5. Build the SDK body. `DeploymentCreateParams` only types the special files + `manifest`, so we
+  //    use a loose Record and cast at the call site; at runtime `createForm` forwards every field —
+  //    strings as text, `File` values as binary multipart fields (identical to `-F "path=@file"`).
+  const body: Record<string, unknown> = {
+    account_id: accountId,
+    manifest: JSON.stringify(manifest),
+    branch: 'main',
+    commit_hash: 'direct-upload',
+    commit_message: 'Deploy via CF Manager (SDK)',
+    commit_dirty: 'false',
+  };
+
+  // Regular assets: field name = relative path, value = binary File
+  for (const f of assetFiles) {
+    body[f.path] = new File([bufferToBlobPart(f.buffer)], f.path, { type: getContentType(f.path) });
+  }
+
+  // Special files: field name = fixed basename (mutually exclusive where required)
+  for (const f of specialFiles) {
+    const basename = f.path.split('/').pop() || f.path;
+    body[basename] = new File([bufferToBlobPart(f.buffer)], basename, { type: getContentType(f.path) });
+    appLogger.info(`[Pages Deploy] Special file: ${basename} (${f.buffer.length} bytes)`);
+  }
+
+  // 6. One call: inline all bytes + manifest → deployment. No intermediate asset upload needed.
+  appLogger.info(`[Pages Deploy] Creating deployment via SDK | manifest entries: ${assetFiles.length} | special files: ${specialFiles.length}`);
+  const depResult: any = await cf.pages.projects.deployments.create(projectName, body as any);
+
+  appLogger.info(`[Pages Deploy] Deployment created: ${depResult?.url || '(no url)'}`);
+  appLogger.info(`[Pages Deploy] Deployment env: ${depResult?.environment} | id: ${depResult?.id}`);
+  appLogger.info(`[Pages Deploy] Deployment env_vars: ${JSON.stringify(depResult?.env_vars || {})}`);
+  appLogger.info(`[Pages Deploy] Deployment kv_namespaces: ${JSON.stringify(depResult?.kv_namespaces || 'none')}`);
+  return depResult;
 }

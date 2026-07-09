@@ -38,3 +38,16 @@ CREATE TABLE IF NOT EXISTS app_settings (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS catalog_sources (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  url           TEXT NOT NULL UNIQUE,
+  name          TEXT NOT NULL,
+  is_default    INTEGER DEFAULT 0,
+  enabled       INTEGER DEFAULT 1,
+  last_synced   DATETIME,
+  last_status   TEXT DEFAULT 'pending',
+  last_error    TEXT,
+  etag          TEXT,
+  created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
+);

@@ -16,24 +16,37 @@ backups/
 *.sw?
 
 docs/specs
+docs/superpowers/
+reg/
 worker/public/
 worker/cf-manager.zip
 
-# Ignore generated pricing data files (managed by sync script)
+# Ignore generated pricing data files (managed by sync-shared script)
 backend/src/data/
 worker/src/data/
+
+# Ignore generated catalog schema + validator (managed by sync-shared script)
+backend/src/services/catalog.schema.json
+backend/src/services/catalogValidator.ts
+worker/src/services/catalog.schema.json
+worker/src/services/catalogValidator.ts
 
 # Ignore generated version files (managed by gen-version script)
 worker/src/version.ts
 backend/src/version.ts
 
 # Ignore AI tool configuration directories
+.agents/
 .codebuddy/
 .cursor/
 .claude/
 .aider/
 .windsurf/
 .github/copilot/
+skills-lock.json
+
+# Ignore local catalog samples (debug only)
+samples/
 
 # Ignore CSV files with credentials
 *.csv

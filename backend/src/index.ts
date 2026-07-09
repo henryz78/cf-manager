@@ -16,6 +16,7 @@ import tasksRouter from './routes/tasks';
 import openaiRouter from './routes/openai';
 import externalBrowserRenderRouter from './routes/externalBrowserRender';
 import aiRouter from './routes/ai';
+import storeRouter from './routes/store';
 import { getQuotaSummary, syncUsageFromCloudflare } from './services/quotaTracker';
 import { invalidateAiCache } from './services/accountRouter';
 import { getRecentLogs, queryLogs, getDistinctActions } from './models/auditLog';
@@ -25,6 +26,9 @@ import { v1RequestLogger } from './middleware/v1Logger';
 import { apiRequestLogger } from './middleware/apiLogger';
 import { requestIdMiddleware } from './middleware/requestId';
 import { appLogger } from './services/logger';
+import cron from 'node-cron';
+import { getEnabledCatalogSources } from './models/catalogSource';
+import { refreshCatalogSource } from './routes/store';
 
 const app = express();
 
@@ -63,6 +67,7 @@ app.use('/api/settings', settingsRouter);
 app.use('/api/storage', storageRouter);
 app.use('/api/tasks', tasksRouter);
 app.use('/api/ai', aiRouter);
+app.use('/api/store', storeRouter);
 app.use('/api/v1', requestIdMiddleware);
 app.use('/api/v1', v1RequestLogger);
 app.use('/api/v1', openaiRouter);
@@ -99,6 +104,14 @@ async function start() {
   initDb();
   initScheduler();
   initBrowserRateLimiter();
+
+  // Catalog refresh cron (every 6 hours)
+  cron.schedule('0 */6 * * *', async () => {
+    const sources = getEnabledCatalogSources();
+    for (const s of sources) {
+      try { await refreshCatalogSource(s); } catch (e) { appLogger.error(`[Cron] catalog refresh ${s.id}: ${e}`); }
+    }
+  });
   app.listen(config.port, () => {
     appLogger.info(`Server running on port ${config.port}`);
   });

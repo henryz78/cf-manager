@@ -1,6 +1,6 @@
 {
   "name": "cf-manager-worker",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "private": true,
   "scripts": {
     "dev": "wrangler pages dev public/ --d1 DB",
@@ -10,6 +10,10 @@
     "db:init": "wrangler d1 execute cf-manager --file=src/db/schema.sql --remote"
   },
   "dependencies": {
+    "ajv": "^8.20.0",
+    "ajv-errors": "^3.0.0",
+    "ajv-formats": "^3.0.1",
+    "hash-wasm": "^4.12.0",
     "hono": "^4"
   },
   "devDependencies": {

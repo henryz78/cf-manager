@@ -16,3 +16,6 @@ id = "YOUR_KV_NAMESPACE_ID"
 API_SECRET = ""
 ENCRYPTION_KEY = ""
 DEMO_ACCOUNT_IDS = ""
+
+[triggers]
+crons = ["0 */6 * * *"]

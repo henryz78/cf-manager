@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.3.0] - 2026-07-09
+
+### 🚀 新特性
+
+- **应用商店（Catalog Store）**：新增完整的应用商店能力，用户可从 catalog 源浏览、部署 Cloudflare Worker / Pages 模板。
+  - **后端**：新增 `store` 路由（catalog 源 CRUD、模板列表、部署、刷新）、`catalogSource` 数据模型、`catalogDeploy` 部署服务；`db.ts` 增加 catalog 源相关表与初始化。
+  - **Worker**：对称实现 `store` 路由、D1 `catalogSource` 模型与 `schema.sql`、KV 缓存（`catalog:${id}`）、`catalogDeploy` 服务；`index.ts` / `wrangler.toml` 接入新路由与绑定。
+  - **前端**：新增「商店」视图 `StoreView.vue` 与 `StoreDeployDialog.vue` 部署对话框，路由与侧边栏接入；`api/store.ts` 封装全部 store 接口。
+- **Catalog 源可用性测试**：新增 `POST /store/sources/test` 接口（backend 与 worker 对称实现），在添加/编辑自定义源前测试 URL 是否可拉取且符合 catalog 格式，前端设置页对接实时反馈（`✓ 可用，包含 N 个模板` / `✗ 错误原因`），测试通过前禁用「添加/保存」按钮。
+- **官方源多地址 fallback**：官方默认源支持多个备用地址，主地址不可达（如 GitHub raw 被限流）时按顺序自动切换镜像，当前 fallback 链为 GitHub raw → jsdelivr → surge.sh；自定义源仅使用自身 URL，不触发 fallback。
+- **Pages 部署能力**：新增 Cloudflare Pages 项目部署能力——worker 端 `pagesDeploy.ts` 与后端 `workerService` 的 `deployPages()`，支持创建/确保 Project 并上传构建产物发布部署；补充 `docs/pages-upload.md` 调研与实现指南（文档化 multipart 直传契约）。
+- **设置页 Catalog 源管理**：`SettingsView.vue` 支持添加 / 编辑 / 删除自定义 catalog 源，编辑默认源 URL 受保护（禁止修改官方源地址）。
+
+### ♻️ 重构
+
+- **catalog 校验逻辑共享化**：将 catalog 校验逻辑抽离到 `shared/catalogValidator.ts` 与 `shared/catalog.schema.json`，backend 与 worker 共用，删除各自旧有的 `catalogValidator.ts`；新增 `scripts/sync-shared.js` 同步脚本替换旧的 `scripts/sync-pricing.js`。
+- **部署服务整合**：`workerService.ts` 与 worker `workers.ts` 重构，承接 store / Pages 部署逻辑，统一 catalog 拉取与 etag 缓存策略。
+
+---
+
 ## [1.2.0] - 2026-07-08
 
 ### 🚀 新特性

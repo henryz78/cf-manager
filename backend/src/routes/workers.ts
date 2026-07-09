@@ -50,7 +50,7 @@ router.get('/', async (_req: Request, res: Response, next: NextFunction) => {
         listPages(account),
       ]);
       if (workers.status === 'fulfilled') {
-        items.push(...workers.value.map(w => ({ ...w, type: 'worker', cfAccountId: account.id, accountName: account.name })));
+        items.push(...workers.value.map(w => ({ ...w, name: w.id, status: 'deployed', type: 'worker', cfAccountId: account.id, accountName: account.name })));
       } else {
         appLogger.error(`[Workers] Failed to list workers for ${account.name}: ${workers.reason}`);
       }
@@ -74,13 +74,13 @@ router.post('/:accountId/workers', upload.single('script'), async (req: Request,
     if (!name) { res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Worker name is required' } }); return; }
     // Support both file upload and URL
     if (req.body.url) {
-      const result = await deployWorkerFromUrl(account, name, req.body.url);
+      const { script } = await deployWorkerFromUrl(account, name, req.body.url);
       createAuditLog(account.id, 'deploy_worker', name, `from_url=${req.body.url}`, 'success');
-      res.status(201).json(result);
+      res.status(201).json(script);
     } else if (req.file) {
-      const result = await deployWorker(account, name, req.file.buffer.toString('utf-8'));
+      const { script } = await deployWorker(account, name, req.file.buffer.toString('utf-8'));
       createAuditLog(account.id, 'deploy_worker', name, `file_size=${req.file.size}`, 'success');
-      res.status(201).json(result);
+      res.status(201).json(script);
     } else {
       res.status(400).json({ error: { code: 'NO_FILE', message: 'Script file or URL is required' } });
     }

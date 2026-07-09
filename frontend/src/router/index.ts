@@ -9,6 +9,7 @@ const routes = [
   { path: '/storage', name: 'storage', component: () => import('../views/StorageView.vue') },
   { path: '/browser-render', name: 'browser-render', component: () => import('../views/BrowserRenderView.vue') },
   { path: '/settings', name: 'settings', component: () => import('../views/SettingsView.vue') },
+  { path: '/store', name: 'store', component: () => import('../views/StoreView.vue') },
 ];
 
 const router = createRouter({

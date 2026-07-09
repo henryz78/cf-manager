@@ -4,73 +4,12 @@ import { getAccountById, getActiveAccountsByFeature, addAuditLog } from '../db/m
 import { cfFetch, cfFetchRaw, cfFetchAll } from '../services/cfApi';
 import { getWorkersUsageToday } from '../services/quotaTracker';
 import { demoDestructiveGuard } from '../services/demo';
+import { deployPages, extractZipFiles } from '../services/pagesDeploy';
 
 const app = new Hono<{ Bindings: Env }>();
 
 // 演示账户：拦截所有销毁/删除类操作（DELETE 等）
 app.use('/:accountId/*', demoDestructiveGuard());
-
-async function extractZipFiles(zipData: Uint8Array): Promise<Array<{ path: string; buffer: Uint8Array }>> {
-  const files: Array<{ path: string; buffer: Uint8Array }> = [];
-  const view = new DataView(zipData.buffer, zipData.byteOffset, zipData.byteLength);
-
-  let eocdOffset = -1;
-  for (let i = zipData.length - 22; i >= 0; i--) {
-    if (view.getUint32(i, true) === 0x06054b50) { eocdOffset = i; break; }
-  }
-  if (eocdOffset < 0) return files;
-
-  const cdOffset = view.getUint32(eocdOffset + 16, true);
-  const cdEntries = view.getUint16(eocdOffset + 10, true);
-  let pos = cdOffset;
-
-  for (let i = 0; i < cdEntries; i++) {
-    if (view.getUint32(pos, true) !== 0x02014b50) break;
-    const compression = view.getUint16(pos + 10, true);
-    const compSize = view.getUint32(pos + 20, true);
-    const uncompSize = view.getUint32(pos + 24, true);
-    const nameLen = view.getUint16(pos + 28, true);
-    const extraLen = view.getUint16(pos + 30, true);
-    const commentLen = view.getUint16(pos + 32, true);
-    const localHeaderOffset = view.getUint32(pos + 42, true);
-    const name = new TextDecoder().decode(zipData.slice(pos + 46, pos + 46 + nameLen));
-    pos += 46 + nameLen + extraLen + commentLen;
-
-    if (name.endsWith('/')) continue;
-
-    const localNameLen = view.getUint16(localHeaderOffset + 26, true);
-    const localExtraLen = view.getUint16(localHeaderOffset + 28, true);
-    const dataStart = localHeaderOffset + 30 + localNameLen + localExtraLen;
-
-    let fileData: Uint8Array;
-    if (compression === 0) {
-      fileData = zipData.slice(dataStart, dataStart + uncompSize);
-    } else if (compression === 8) {
-      const compressed = zipData.slice(dataStart, dataStart + compSize);
-      const ds = new DecompressionStream('deflate-raw');
-      const writer = ds.writable.getWriter();
-      const reader = ds.readable.getReader();
-      writer.write(compressed);
-      writer.close();
-      const chunks: Uint8Array[] = [];
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value);
-      }
-      const total = chunks.reduce((s, c) => s + c.length, 0);
-      fileData = new Uint8Array(total);
-      let offset = 0;
-      for (const chunk of chunks) { fileData.set(chunk, offset); offset += chunk.length; }
-    } else {
-      continue;
-    }
-
-    const cleanPath = name.replace(/\\/g, '/').replace(/^\/+/, '');
-    files.push({ path: cleanPath, buffer: fileData });
-  }
-  return files;
-}
 
 async function requireAccount(c: any) {
   const id = parseInt(c.req.param('accountId'), 10);
@@ -412,12 +351,6 @@ app.get('/usage', async (c) => {
   return c.json(results);
 });
 
-// ============ Pages Deploy ============
-async function sha256Hex(data: Uint8Array): Promise<string> {
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 app.post('/:accountId/pages/deploy', async (c) => {
   const account = await requireAccount(c);
   const formData = await c.req.formData();
@@ -469,36 +402,10 @@ app.post('/:accountId/pages/deploy', async (c) => {
     return c.json(project.result || project, 201);
   }
 
-  const SPECIAL_FILES = new Set(['_worker.js', '_worker.bundle', '_headers', '_redirects', '_routes.json', 'functions-filepath-routing-config.json']);
-
-  const manifest: Record<string, string> = {};
-  const deployForm = new FormData();
-  const specialFiles: Array<{ name: string; buffer: Uint8Array }> = [];
-
-  for (const f of files) {
-    const basename = f.path.split('/').pop() || f.path;
-    if (SPECIAL_FILES.has(basename) && !f.path.includes('/')) {
-      specialFiles.push({ name: basename, buffer: f.buffer });
-    } else {
-      const hash = await sha256Hex(f.buffer);
-      manifest[f.path] = hash;
-      deployForm.append(f.path, new Blob([f.buffer], { type: 'application/octet-stream' }), f.path);
-    }
-  }
-
-  deployForm.append('manifest', JSON.stringify(manifest));
-  deployForm.append('branch', 'main');
-  deployForm.append('commit_message', 'Deploy via CF Manager');
-
-  for (const sf of specialFiles) {
-    deployForm.append(sf.name, new Blob([sf.buffer], { type: 'application/octet-stream' }), sf.name);
-  }
-
-  const resp = await cfFetchRaw(account, `/accounts/${account.account_id}/pages/projects/${name}/deployments`, c.env.ENCRYPTION_KEY, {
-    method: 'POST', body: deployForm,
+  const result = await deployPages(account, c.env.ENCRYPTION_KEY, name, files, {
+    skipCreateProject: true, // project 已在上方的 if (!skipCreateProject) 块中创建
+    commitMessage: 'Deploy via CF Manager',
   });
-  const result = await resp.json();
-  if (!resp.ok) throw new Error(`Pages deploy failed: ${JSON.stringify(result)}`);
 
   await addAuditLog(c.env.DB, { account_id: account.id, action: 'deploy_pages', target: name, detail: `${files.length} files`, status: 'success' });
   return c.json(result, 201);
@@ -571,42 +478,9 @@ app.post('/batch-deploy-pages', async (c) => {
       const account = await getAccountById(c.env.DB, t.accountId);
       if (!account) { results.push({ ...t, success: false, error: 'Account not found' }); continue; }
 
-      try {
-        await cfFetch(account, `/accounts/${account.account_id}/pages/projects`, c.env.ENCRYPTION_KEY, {
-          method: 'POST', body: JSON.stringify({ name: t.workerName, production_branch: 'main' }),
-        });
-      } catch (e: any) {
-        if (!e.body?.includes('already exists') && e.status !== 409) throw e;
-      }
-
-      const SPECIAL_FILES = new Set(['_worker.js', '_worker.bundle', '_headers', '_redirects', '_routes.json', 'functions-filepath-routing-config.json']);
-      const manifest: Record<string, string> = {};
-      const deployForm = new FormData();
-      const specialFiles: Array<{ name: string; buffer: Uint8Array }> = [];
-      for (const f of files) {
-        const basename = f.path.split('/').pop() || f.path;
-        if (SPECIAL_FILES.has(basename) && !f.path.includes('/')) {
-          specialFiles.push({ name: basename, buffer: f.buffer });
-        } else {
-          const hash = await sha256Hex(f.buffer);
-          manifest[f.path] = hash;
-          deployForm.append(f.path, new Blob([f.buffer], { type: 'application/octet-stream' }), f.path);
-        }
-      }
-      deployForm.append('manifest', JSON.stringify(manifest));
-      deployForm.append('branch', 'main');
-      deployForm.append('commit_message', 'Batch deploy via CF Manager');
-      for (const sf of specialFiles) {
-        deployForm.append(sf.name, new Blob([sf.buffer], { type: 'application/octet-stream' }), sf.name);
-      }
-
-      const resp = await cfFetchRaw(account, `/accounts/${account.account_id}/pages/projects/${t.workerName}/deployments`, c.env.ENCRYPTION_KEY, {
-        method: 'POST', body: deployForm,
+      await deployPages(account, c.env.ENCRYPTION_KEY, t.workerName, files, {
+        commitMessage: 'Batch deploy via CF Manager',
       });
-      if (!resp.ok) {
-        const errBody = await resp.text();
-        throw new Error(`Deploy failed: ${errBody}`);
-      }
       await addAuditLog(c.env.DB, { account_id: account.id, action: 'batch_deploy_pages', target: t.workerName, detail: `${files.length} files`, status: 'success' });
       results.push({ ...t, success: true });
     } catch (err: any) {

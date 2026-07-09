@@ -1229,7 +1229,7 @@ const columns = computed<DataTableColumns<any>>(() => {
     { title: '类型', key: 'type', width: 80, render: (row) => h(NTag, { size: 'small', type: row.type === 'pages' ? 'info' : 'success' }, { default: () => row.type === 'pages' ? 'Pages' : 'Worker' }) },
     { title: '名称', key: 'name', width: 180 },
     { title: '账号', key: 'accountName', width: 120, render: (row) => row.accountName || row.cfAccountId },
-    { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { size: 'small', type: row.status === 'enabled' ? 'success' : 'default' }, { default: () => row.status || (row.type === 'pages' ? 'active' : 'unknown') }) },
+    { title: '状态', key: 'status', width: 100, render: (row) => h(NTag, { size: 'small', type: row.status === 'deployed' || row.status === 'enabled' ? 'success' : 'default' }, { default: () => row.status || (row.type === 'pages' ? 'active' : '已部署') }) },
   ];
   if (hasModifiedOn) {
     cols.push({ title: '修改时间', key: 'modified_on', width: 180, render: (row) => row.modified_on ? formatCN(row.modified_on) : '-' });
