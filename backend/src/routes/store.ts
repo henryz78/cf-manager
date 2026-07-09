@@ -8,11 +8,12 @@ import { deployTemplate } from '../services/catalogDeploy';
 import { getAccountById } from '../models/account';
 import { appLogger } from '../services/logger';
 
-const DEFAULT_CATALOG_URL = 'https://raw.githubusercontent.com/hefy2027/cf-store/main/catalog.json';
-// 官方源备用地址：主地址不可达时按顺序尝试（常用于 GitHub raw 被限流/不可达时的镜像）
+// 主源用 surge.sh：Surge 静态托管，更新即时生效，避免 jsDelivr 缓存 GitHub 主分支导致更新延迟。
+// 兜底顺序：surge.sh → jsDelivr → GitHub raw（GitHub raw 放最后，作为最终兜底）。
+const DEFAULT_CATALOG_URL = 'https://cf-store.surge.sh/catalog.json';
 const DEFAULT_CATALOG_FALLBACK_URLS = [
   'https://cdn.jsdelivr.net/gh/hefy2027/cf-store@main/catalog.json',
-  'https://cf-store.surge.sh/catalog.json',
+  'https://raw.githubusercontent.com/hefy2027/cf-store/main/catalog.json',
 ];
 const DEFAULT_CATALOG_URLS = [DEFAULT_CATALOG_URL, ...DEFAULT_CATALOG_FALLBACK_URLS];
 const DEFAULT_CATALOG_NAME = '官方源';
