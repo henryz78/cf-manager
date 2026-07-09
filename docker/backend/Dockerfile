@@ -17,8 +17,11 @@ ARG GIT_COMMIT=""
 ENV BACKEND_SRC=/app/src
 ENV GIT_COMMIT=${GIT_COMMIT}
 RUN node scripts/gen-version.js backend
-# model-pricing.json 在 .gitignore 中，需从 shared/ 手动拷贝
+# model-pricing.json / catalog.schema.json / catalogValidator.ts 均为 .gitignore 的
+# 生成产物（来源在 shared/，本地由 scripts/sync-shared.js 生成），Docker 中需手动拷贝。
 COPY shared/model-pricing.json ./src/data/model-pricing.json
+COPY shared/catalog.schema.json ./src/services/catalog.schema.json
+COPY shared/catalogValidator.ts ./src/services/catalogValidator.ts
 RUN npx tsc
 # Prune dev deps in builder so production just copies clean node_modules
 RUN npm prune --omit=dev
