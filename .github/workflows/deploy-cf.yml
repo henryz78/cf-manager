@@ -161,9 +161,6 @@ jobs:
             DB_LIST2=$(list_d1)
             DB_ID=$(get_db_id "$DB_LIST2" "$DB_NAME")
             echo "Created database with ID: $DB_ID"
-
-            echo "Initializing database schema..."
-            wrangler d1 execute "$DB_NAME" --file=worker/src/db/schema.sql --remote
           else
             echo "Database already exists: $DB_NAME (ID: $DB_ID)"
             if [ "${{ github.event.inputs.full_wipe }}" = "true" ]; then
@@ -172,10 +169,11 @@ jobs:
               wrangler d1 execute "$DB_NAME" --command="DROP TABLE IF EXISTS audit_log" --remote || true
               wrangler d1 execute "$DB_NAME" --command="DROP TABLE IF EXISTS app_settings" --remote || true
               wrangler d1 execute "$DB_NAME" --command="DROP TABLE IF EXISTS accounts" --remote || true
-              echo "重新初始化 Schema..."
-              wrangler d1 execute "$DB_NAME" --file=worker/src/db/schema.sql --remote
             fi
           fi
+
+          echo "Initializing/updating database schema..."
+          wrangler d1 execute "$DB_NAME" --file=worker/src/db/schema.sql --remote
 
           echo "database_id=$DB_ID" >> $GITHUB_OUTPUT
 
