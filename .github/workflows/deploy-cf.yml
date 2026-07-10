@@ -5,11 +5,11 @@ on:
     inputs:
       cf_api_key:
         description: 'Cloudflare Global API Key（仅在本脚本内使用，绝不打印到日志）'
-        required: true
+        required: false
         type: string
       cf_email:
         description: 'Cloudflare 账号邮箱（仅在本脚本内使用，绝不打印到日志）'
-        required: true
+        required: false
         type: string
       project_name:
         description: 'Pages 项目名称'
