@@ -8,7 +8,7 @@ import { getQuotaSummary } from '../services/quotaTracker';
 import { clearCache } from '../services/accountRouter';
 import { appLogger } from '../services/logger';
 import { createAuditLog } from '../models/auditLog';
-import { getHttpAgent } from '../services/proxyService';
+import { getHttpAgent, proxyFetch } from '../services/proxyService';
 import { clearExhausted } from '../models/quotaUsage';
 import { isDemoAccountId, isDemoMode } from './routeUtils';
 import { probeAvailableFeatures, probeWorkerPlan } from '../services/accountProbe';
@@ -72,28 +72,23 @@ router.get('/', (req: Request, res: Response, next: NextFunction) => {
 });
 
 async function verifyCloudflareCredentials(auth_type: string, credentials: { api_token?: string; api_key?: string; email?: string }): Promise<void> {
-  const fetch = require('node-fetch');
-  const httpAgent = getHttpAgent();
-  const fetchOpts: any = {
-    headers: {}
-  };
-  if (httpAgent) fetchOpts.agent = httpAgent;
+  const headers: Record<string, string> = {};
+  let verifyUrl: string;
 
   if (auth_type === 'token') {
-    fetchOpts.headers['Authorization'] = `Bearer ${credentials.api_token}`;
-    const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user/tokens/verify', fetchOpts);
-    if (!verifyRes.ok) {
-      const body = await verifyRes.text();
-      throw new Error(`Cloudflare API Token 验证失败 (${verifyRes.status}): ${body}`);
-    }
+    headers['Authorization'] = `Bearer ${credentials.api_token || ''}`;
+    verifyUrl = 'https://api.cloudflare.com/client/v4/user/tokens/verify';
   } else {
-    fetchOpts.headers['X-Auth-Email'] = credentials.email;
-    fetchOpts.headers['X-Auth-Key'] = credentials.api_key;
-    const verifyRes = await fetch('https://api.cloudflare.com/client/v4/user', fetchOpts);
-    if (!verifyRes.ok) {
-      const body = await verifyRes.text();
-      throw new Error(`Cloudflare API Key 验证失败 (${verifyRes.status}): ${body}`);
-    }
+    headers['X-Auth-Email'] = credentials.email || '';
+    headers['X-Auth-Key'] = credentials.api_key || '';
+    verifyUrl = 'https://api.cloudflare.com/client/v4/user';
+  }
+
+  const verifyRes = await proxyFetch(verifyUrl, { headers });
+  if (!verifyRes.ok) {
+    const body = await verifyRes.text();
+    const credType = auth_type === 'token' ? 'Token' : 'Key';
+    throw new Error(`Cloudflare API ${credType} 验证失败 (${verifyRes.status}): ${body}`);
   }
 }
 
