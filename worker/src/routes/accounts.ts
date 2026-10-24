@@ -89,7 +89,7 @@ async function verifyCloudflareCredentials(auth_type: string, credentials: { api
 app.post('/', async (c) => {
   const db = c.env.DB;
   const body = await c.req.json();
-  const { name, auth_type, api_token, api_key, email, enabled_features } = body;
+  const { name, auth_type, api_token, api_key, email, enabled_features, account_id } = body;
 
   if (!name || !auth_type) return c.json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } }, 400);
   if (auth_type !== 'token' && auth_type !== 'global_key') return c.json({ error: { code: 'VALIDATION_ERROR', message: 'auth_type must be "token" or "global_key"' } }, 400);
@@ -281,12 +281,10 @@ app.get('/:id/credentials', async (c) => {
   
   let api_token: string | null = null;
   let api_key: string | null = null;
-  let password: string | null = null;
   
   try {
     if (account.api_token) api_token = await decrypt(account.api_token, encryptionKey);
     if (account.api_key) api_key = await decrypt(account.api_key, encryptionKey);
-    if (account.password) password = await decrypt(account.password, encryptionKey);
   } catch (e: any) {
     console.error(`[Account] 解密凭证失败 id=${id}: ${e}`);
     return c.json({ error: { code: 'DECRYPT_ERROR', message: '凭证解密失败' } }, 500);
@@ -309,7 +307,6 @@ app.get('/:id/credentials', async (c) => {
     email: account.email,
     api_token,
     api_key,
-    password,
     account_id: account.account_id,
   });
 });

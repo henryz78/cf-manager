@@ -99,7 +99,7 @@ async function verifyCloudflareCredentials(auth_type: string, credentials: { api
 
 router.post('/', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const { name, auth_type, api_token, api_key, email } = req.body;
+    const { name, auth_type, api_token, api_key, email, account_id } = req.body;
     if (!name || !auth_type) {
       res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'name and auth_type are required' } });
       return;
